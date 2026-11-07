@@ -7,7 +7,7 @@ function client(name, pickE) {
     const c = { name, ws, me: "", lobby: null, snaps: 0, bytes: 0, last: null, taps: 0, redirects: 0, presses: 0, dirs: 0, gaps: [], at: 0, kinds: {} };
     const send = m => ws.readyState === 1 && ws.send(JSON.stringify(m));
     c.send = send;
-    ws.onopen = () => { send({ t: "hello", name, auto: false, prompts: true }); resolve(c); };
+    ws.onopen = () => { send({ t: "hello", name, auto: false, prompts: true, cid: "test" + name.toLowerCase().slice(0, 6) }); resolve(c); };
     ws.onmessage = e => {
       const m = JSON.parse(e.data);
       if (m.t === "you") c.me = m.id;

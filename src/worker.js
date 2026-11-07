@@ -1,7 +1,9 @@
-// Вход в Worker: /ws?room=abcd ведёт в комнату, /config.json отдаёт имя бота, остальное - файлы игры из public/.
+// Вход в Worker: /ws?room=abcd ведёт в комнату, /config.json отдаёт имя бота, /api/ev и /stats - статистика,
+// остальное - файлы игры из public/.
 import { Room } from "./room.js";
+import { Stats } from "./stats.js";
 
-export { Room };
+export { Room, Stats };
 
 export default {
   async fetch(req, env) {
@@ -14,6 +16,9 @@ export default {
     }
     if (url.pathname === "/config.json") {
       return Response.json({ bot: env.BOT_USERNAME || "", app: env.APP_NAME || "" }, { headers: { "cache-control": "no-store" } });
+    }
+    if ((url.pathname === "/api/ev" && req.method === "POST") || url.pathname === "/stats" || url.pathname === "/stats.json") {
+      return env.STATS.get(env.STATS.idFromName("all")).fetch(req);
     }
     return env.ASSETS.fetch(req);
   },

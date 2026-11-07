@@ -1,7 +1,7 @@
 // Одна комната = один Durable Object. Бой считает сервер, телефоны только рисуют и шлют нажатия.
 // Пока в комнате просто ждут, объект может уснуть (WebSocket Hibernation): данные игроков лежат во вложениях сокетов.
 import { DurableObject } from "cloudflare:workers";
-import { Game, NEL, DT, pickFree } from "../public/game.js";
+import { Game, NEL, N, DT, pickFree } from "../public/game.js";
 
 const TICK_MS = 33;        // шаг цикла
 const SNAP_MS = 66;        // снимок боя 15 раз в секунду
@@ -60,7 +60,8 @@ export class Room extends DurableObject {
     const seat = this.game ? this.seats.find(s => s.id === a.id) : null;
     switch (m.t) {
       case "hello":
-        a.name = clean(m.name) || "Player"; a.auto = !!m.auto; a.prompts = m.prompts !== false; save();
+        a.name = clean(m.name) || "Player"; a.auto = !!m.auto; a.prompts = m.prompts !== false;
+        a.cid = String(m.cid || "").replace(/[^a-z0-9]/g, "").slice(0, 12); save();
         this.send(ws, { t: "you", id: a.id });
         this.sendLobby();
         if (this.game) this.send(ws, { t: "s", s: this.snap(true) });
@@ -126,7 +127,7 @@ export class Room extends DurableObject {
     const seats = players.map(p => {
       let e = p.a.e;
       if (e < 0) { e = pickFree(used); used.push(e); }
-      return { id: p.a.id, e, name: p.a.name || "Player", auto: p.a.auto, prompts: p.a.prompts };
+      return { id: p.a.id, e, name: p.a.name || "Player", auto: p.a.auto, prompts: p.a.prompts, cid: p.a.cid || "" };
     });
     while (seats.length < SEATS) { const e = pickFree(used); used.push(e); seats.push({ id: "", e, name: "" }); }
     this.game = new Game(seats.map(s => ({ e: s.e, ctl: s.id || null })));
@@ -178,7 +179,17 @@ export class Room extends DurableObject {
       this.snapAt = now;
       this.broadcast({ t: "s", s: this.snap(false) });
     }
-    if (this.phase === "end") { this.stop(); this.sendLobby(); }
+    if (this.phase === "end") { this.stop(); this.sendLobby(); this.record(); }
+  }
+  // итог матча в общую статистику; сбой статистики не мешает игре
+  record() {
+    try {
+      const S = this.game.S, order = S.players.slice().sort((a, b) => S.counts[b] - S.counts[a]);
+      const seats = this.seats.map(s => ({ e: s.e, human: !!s.id, cid: s.cid || "", place: order.indexOf(s.e) + 1,
+        pct: Math.round(S.counts[s.e] / N * 1000) / 10, kills: S.by[s.e].kills, powers: S.by[s.e].powers }));
+      const stub = this.env.STATS.get(this.env.STATS.idFromName("all"));
+      this.ctx.waitUntil(stub.match({ mode: "room", reactions: S.reactions, seats }).catch(e => console.error("stats failed", e && e.message)));
+    } catch (e) { console.error("stats failed", e && e.stack); }
   }
   snap(full) {
     const ev = full ? [] : this.game.drain().filter(q => !SKIP.has(q[1]));  // новичку - без событий, остальным их не теряем

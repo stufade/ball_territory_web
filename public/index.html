@@ -907,7 +907,11 @@ function startWin() {
   Object.assign(win, { parts: [], e: order[0], order, pct: order.map(e => S.counts[e] / N * 100), once: {}, shake: 0, splats: [], cracks: null,
     from: b && b.alive ? [px(b.x), py(b.y)] : [FX + FW / 2, FY + FH / 2] });
   phase = "end"; endAt = fx.now; haptic("heavy");
-  if (tut) { tutDone = true; try { localStorage.setItem("bt-tut", "1"); } catch (e) { /* не страшно */ } }
+  if (tut) { tutDone = true; try { localStorage.setItem("bt-tut", "1"); } catch (e) { /* не страшно */ } track("tut", { v: "done" }); }
+  if (net.mode === "solo" && S.you) {
+    track(tut ? "tut_end" : "solo_end", { reactions: S.reactions, seats: S.players.map(q => ({ e: q, human: S.by[q] === S.you, place: order.indexOf(q) + 1,
+      pct: Math.round(S.counts[q] / N * 1000) / 10, kills: S.by[q].kills, powers: S.by[q].powers })) });
+  }
 }
 function wp(x, y, vx, vy, o) {
   win.parts.push(Object.assign({ x, y, vx, vy, g: 0, drag: 1, life: 1, t: 0, r: 8, col: "#fff", kind: "c", rot: rnd(6.3), vr: 0, a: 1 }, o));
@@ -1029,9 +1033,9 @@ function winBack(e, kk) {
     g.save(); g.translate(WX, WY); g.rotate(rot);
     g.beginPath(); g.arc(-off, 0, R, Math.PI / 2, -Math.PI / 2); g.arc(-off, -R / 2, R / 2, -Math.PI / 2, Math.PI / 2); g.arc(-off, R / 2, R / 2, -Math.PI / 2, Math.PI / 2, true); g.closePath();
     g.fillStyle = "#f2f2f2"; g.fill();
-    g.beginPath(); g.arc(off, 0, R, -Math.PI / 2, Math.PI / 2); g.arc(off, R / 2, R / 2, Math.PI / 2, -Math.PI / 2, true); g.arc(off, -R / 2, R / 2, Math.PI / 2, -Math.PI / 2); g.closePath();
+    g.beginPath(); g.arc(off, 0, R, -Math.PI / 2, Math.PI / 2); g.arc(off, R / 2, R / 2, Math.PI / 2, -Math.PI / 2); g.arc(off, -R / 2, R / 2, Math.PI / 2, -Math.PI / 2, true); g.closePath();
     g.fillStyle = "#262626"; g.fill();
-    circle(-off, R / 2, R * .14, "#262626"); circle(off, -R / 2, R * .14, "#f2f2f2");
+    circle(-off, -R / 2, R * .14, "#262626"); circle(off, R / 2, R * .14, "#f2f2f2");
     if (close >= 1) ringAt(0, 0, R + 6, "#8c8c8c", 6);
     g.restore();
     if (kk > .85 && kk < 1.3) { g.globalAlpha = (1.3 - kk) / .45; circle(WX, WY, R + 60, "#fff"); g.globalAlpha = 1; }
@@ -1248,10 +1252,11 @@ function startTutorial() {
   S = game.S; S.you = S.by[TUT_ME]; S.you.auto = false; S.nextPrompt = 1e9;
   game.drain(); fx.reset(); phase = "aim"; aimStart = fx.now; dragging = false; acc = 0;
   tut = { step: "goal", at: fx.now };
+  track("tut", { v: "goal" });
   snd.voice();
 }
 function tutGo(step) {
-  tut.step = step; tut.at = fx.now;
+  tut.step = step; tut.at = fx.now; track("tut", { v: step });
   if (step === "power") S.you.charge = 1;
   if (step === "play") { S.tick = Math.round((FINAL - 1.5) / DT); S.t = S.tick * DT; S.you.charge = 1; }
 }
@@ -1343,6 +1348,16 @@ function saveName() {
   const go = afterName; afterName = null;
   if (go) go(); else phase = "title";
 }
+// статистика: случайный id устройства и короткие события, без имён (сводка на /stats)
+let cid = "";
+try { cid = localStorage.getItem("bt-id") || ""; if (!cid) { cid = Math.random().toString(36).slice(2, 12); localStorage.setItem("bt-id", cid); } }
+catch (e) { cid = Math.random().toString(36).slice(2, 12); }
+function track(kind, extra) {
+  if (window.REEL || !/^https?:$/.test(location.protocol)) return;
+  const body = JSON.stringify(Object.assign({ kind, cid, tg: tg ? 1 : 0 }, extra || {}));
+  try { if (!(navigator.sendBeacon && navigator.sendBeacon("./api/ev", body))) fetch("./api/ev", { method: "POST", body, keepalive: true }).catch(() => {}); }
+  catch (e) { /* статистика не важнее игры */ }
+}
 const haptic = kind => { try { if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred(kind); } catch (e) { /* без вибрации */ } };
 let cfg = { bot: "", app: "" };
 fetch("./config.json").then(r => r.json()).then(c => { cfg = c || cfg; }).catch(() => {});
@@ -1364,7 +1379,7 @@ function connect(code) {
   let ws;
   try { ws = new WebSocket(url); } catch (e) { net.err = "Could not reach the game server."; return; }
   net.ws = ws;
-  ws.onopen = () => send({ t: "hello", name: myName(), auto: settings.auto, prompts: settings.prompts });
+  ws.onopen = () => send({ t: "hello", name: myName(), auto: settings.auto, prompts: settings.prompts, cid });
   ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (err) { return; } onMsg(m); };
   ws.onclose = () => { if (net.ws !== ws) return; net.ws = null; if (net.mode === "online") { net.err = "Connection lost."; if (phase !== "lobby") { phase = "lobby"; S = null; } } };
   try { history.replaceState(null, "", location.pathname + "?room=" + code); } catch (e) { /* не страшно */ }
@@ -1380,6 +1395,7 @@ function createRoom() {
   const abc = "abcdefghjkmnpqrstuvwxyz23456789";
   let code = "";
   for (let i = 0; i < 4; i++) code += abc[irnd(0, abc.length - 1)];
+  track("room_create");
   connect(code);
 }
 function invite() {
@@ -1503,7 +1519,7 @@ function openPick() {
   } else roulette = null;
 }
 function startSolo(e) {
-  tut = null;
+  tut = null; track("solo_start", { v: e });
   const used = [e];
   for (let i = 0; i < 3; i++) used.push(pickFree(used));
   game = new Game(used.map((q, i) => ({ e: q, ctl: i === 0 ? "me" : null })));
@@ -1641,6 +1657,7 @@ function tapField(x, y) {
 function joinFromInput() {
   const v = (document.getElementById("code").value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   if (v.length !== 4) { net.err = "The code has 4 letters or digits."; return; }
+  track("room_join");
   connect(v);
 }
 cv.addEventListener("pointerdown", e => {
@@ -1730,7 +1747,8 @@ const startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) ||
 const urlRoom = new URLSearchParams(location.search).get("room") || "";
 const joinCode = (/^r_([a-z0-9]{4})$/i.exec(startParam) || [])[1] || (/^[a-z0-9]{4}$/i.test(urlRoom) ? urlRoom : "");
 const demo = new URLSearchParams(location.search).get("play");
-if (joinCode) connect(joinCode.toLowerCase());
+track("open");
+if (joinCode) { track("room_join"); connect(joinCode.toLowerCase()); }
 else if (demo !== null && TITLE.includes(demo.toUpperCase())) { startSolo(TITLE.indexOf(demo.toUpperCase())); }
 requestAnimationFrame(frame);
 </script>
