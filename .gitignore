@@ -4,3 +4,4 @@ node_modules/
 out/
 reel/plan.json
 .DS_Store
+archive/
