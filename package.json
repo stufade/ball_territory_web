@@ -1,0 +1,16 @@
+{
+  "name": "ball-territory",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "sh scripts/deploy.sh",
+    "balance": "node test/balance.mjs 3000",
+    "test:rooms": "node test/rooms.mjs",
+    "reel": "node reel/pick.mjs 1200 > reel/plan.json && node reel/capture.mjs reel/plan.json out/reel-video.mp4 out/reel-audio.json && ../.venv/bin/python reel/audio.py out/reel-audio.json out/reel-video.mp4 out/reel.mp4"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.2",
+    "puppeteer-core": "25.14.0"
+  }
+}
