@@ -1,6 +1,6 @@
-// Правила Ball Territory: 18 стихий, 4 на всех. Общий модуль для сервера и браузера.
+// Правила Ball Territory: 27 стихий, 4 на всех. Общий модуль для сервера и браузера.
 "use strict";
-const W = 20, H = 24, N = W * H, DT = 1 / 30, ROUND = 60, FOREVER = 9999, NEL = 27;
+const W = 20, H = 24, N = W * H, DT = 1 / 30, ROUND = 60, FINAL = ROUND - 15, FOREVER = 9999, NEL = 27;
 const [FIRE, ICE, PLANT, BOLT, WATER, EARTH, WIND, POISON, METAL, SUN, SAND, LAVA, SLIME, VOID, CRYSTAL, MUSHROOM, SMILEY, SIX7, GAS, SOUND, YINYANG, TIME, GHOST, BOMB, BUBBLE, GLITCH, CANDY] = [...Array(NEL).keys()];
 const TITLE = ["FIRE", "ICE", "PLANT", "LIGHTNING", "WATER", "EARTH", "WIND", "POISON", "METAL", "LIGHT", "SAND", "LAVA", "SLIME", "VOID", "CRYSTAL", "MUSHROOM", "SMILEY", "67", "GAS", "SOUND", "YIN YANG", "TIME", "GHOST", "BOMB", "BUBBLE", "GLITCH", "CANDY"];
 const WORD = ["IGNITE", "FREEZE", "GROW", "STRIKE", "WAVE", "QUAKE", "GUST", "TOXIN", "MAGNET", "FLASH", "SANDSTORM", "ERUPT", "SPLAT", "BLACK HOLE", "CRYSTALLIZE", "SPORES", "IT'S ME", "SIX SEVEN", "GAS CLOUD", "SONIC BOOM", "BALANCE", "SLOW TIME",
@@ -17,9 +17,9 @@ const ABOUT = [
   "Fly through anything and paint rivals' land.", "A bomb that blows up after 1.5 s.", "Bubbles drift out and trap rivals.",
   "Jump into the biggest rival zone and corrupt it.", "A sugar rush: faster and wider paint.",
 ];
-// кто против кого: доля встреч, где стихия закончила выше, по 4000 раундам ботов (test/balance.mjs; не ниже 60% и не выше 40%)
-const STRONG = [[10,15,7],[13,23,6],[10,15,8],[18,1],[0,6,10],[1,11,13],[7,10],[15,8],[1,11,0],[6,1,13],[8,3,5],[15,10,9],[6,7,4],[12],[1,10,8],[8,13,6],[14,23,8],[5,8,3],[8,6,13],[1,14,13],[0,3],[1,10,13],[12,7,6],[6,8,11],[8,5,25],[14,5,13],[6,20,25]];
-const WEAK = [[4,20,11],[21,14,5],[11,0],[17,24,10],[2,24,15],[17,25,24],[17,9,11],[22,6,0],[24,17,15],[11,17,0],[2,21,14],[5,4,8],[22,13,24],[15,1,25],[25,16,19],[11,7,2],[15,2,24],[],[3,11],[17,4,11],[26,17,15],[2,11],[17,24,10],[16,14,1],[],[24,19,26],[14,16,15]];
+// кто против кого: доля встреч, где стихия закончила выше, по 6000 раундам ботов (test/balance.mjs; не ниже 60% и не выше 40%)
+const STRONG = [[7,15,10],[6],[15,10,6],[18,1,20],[10,11,6],[1,11,4],[7,10],[15],[1,11,13],[1,7,14],[13,3,15],[15,10,21],[7,1,6],[12,7],[1,10,6],[21,26],[14,26,12],[5,13,4],[],[1,14,13],[0,13,6],[10,1,26],[12,7,15],[11,13,26],[15,13,4],[14,5],[]];
+const WEAK = [[20,16,24],[9,19,5],[0,11,22],[17,24,22],[24,5,17],[17,25,24],[22,9,17],[6,0,22],[24,17,16],[24,11],[21,6,0],[23,5,8],[22,13,24],[24,17,22],[25,16,19],[11,2,0],[],[22],[3,0,24],[24,16],[16,17,24],[24,17,11],[],[17,24,16],[],[24,16,17],[24,22,16]];
 const LAYERS = ["water", "ice", "bush", "burn", "toxic", "sand", "lava", "slime", "rock", "glass", "shock", "gas"];
 const HARD = ["ice", "rock", "glass", "water", "shock", "toxic", "lava", "burn", "slime", "gas"];
 const TOP = ["shock", "burn", "gas", "lava", "toxic", "slime", "water", "ice", "glass", "rock", "sand", "bush"];
@@ -79,7 +79,7 @@ const P = {
   eruptT: 4, lavaT: 5.5, lavaSpreadP: .11, lavaDps: 25, burnDps: 8, splatN: 7, splatR: 2.1, slimeT: 9,
   holeT: 2.2, holeR: 3.4, holePull: 3.5, holeDmg: 0, holeTug: .1,
   crystalN: 8, crystalLen: 4.4, crystalT: 7, crystalDmg: 20, sporeN: 5, sporeR: 1.3, sporeDelay: 1.2,
-  promptEvery: 12, promptLen: 2.5,
+  promptEvery: 12, promptLen: 2.5, stealR: 3.2, stealHeal: 40, finalDirCd: .2, finalBotAim: [1.4, 2.6],
   gasR: 4, gasT: 5, soundRings: [2.4, 4.2], soundPush: 2.4, soundDmg: 6, balanceR: 6.5, slowT: 2.5, phaseT: 4.5, bombT: 1.5,
   bombR: 3.4, bombDmg: 32, bubbleN: 8, bubbleT: 3, bubbleSpeed: 2.6, glitchN: 40, rushT: 2,
   cloneN: 3, cloneT: 2.6, cloneSpeed: 5.2, cloneR: 1, sixR: 3.6, sevenR: 5.2, sixDmg: 18, sevenDelay: .67,
@@ -243,7 +243,8 @@ function step() {
   S.tick++; S.t = S.tick * DT;
   for (const b of S.balls) { b.px = b.x; b.py = b.y; b.pang = b.ang; }
   if (S.tick % 3 === 0) timers(DT * 3);
-  if (S.t >= S.nextPrompt && S.t < ROUND - 5) {
+  if (!S.final && S.t >= FINAL) { S.final = true; S.promptUntil = -1; ev("final"); }
+  if (S.t >= S.nextPrompt && S.t + P.promptLen < FINAL) {
     S.nextPrompt += P.promptEvery; S.promptUntil = S.t + P.promptLen;
     ev("prompt", { until: r2(S.promptUntil) });
     for (const b of S.balls) b.redirectAt = b.ctl ? 0 : S.t + rnd(.5, 1.7);
@@ -262,7 +263,6 @@ function step() {
   if (S.tick % 3 === 0) hazardStep();
   if (S.tick % 4 === 0) fireStep();
   if (S.tick % 6 === 0) plantStep();
-  if (S.tick % 15 === 0) zoneStep();
   recount();
   if (S.tick >= ROUND / DT) S.done = true;
 }
@@ -287,6 +287,10 @@ function updateBall(b) {
     b.readyT += DT;
     if (!b.ctl) decide(b);
     else if (b.auto) press(b);
+  }
+  if (S.final && !b.ctl && S.t >= (b.finAim || 0)) {
+    b.finAim = S.t + rnd(P.finalBotAim[0], P.finalBotAim[1]);
+    aim(b); turn(b, 0);
   }
   if (b.redirectAt && S.t >= b.redirectAt) {
     b.redirectAt = 0;
@@ -376,7 +380,7 @@ function react(b, rx, layer, k0, touched) {
 // реакция в счёт матча; картинку и звук рисует applyFx
 function reaction(k, x, y, by, layer, extra = {}) {
   S.reactions++;
-  if (!S.seen[k]) { S.seen[k] = true; S.slow = .2; }
+  if (!S.seen[k]) { S.seen[k] = true; if (!S.final) S.slow = .2; }
   ev("rx", Object.assign({ k, x: r2(x), y: r2(y), by, layer }, extra));
 }
 function convert(b, rx, layer, m) {
@@ -577,8 +581,15 @@ function hit(t, dmg, by, quiet, x, y) {
   if (!quiet) ev("hit", { x: r2(x === undefined ? t.x : x), y: r2(y === undefined ? t.y : y) });
   if (t.hp > 0) return;
   t.alive = false; t.respawn = 3; t.surge = t.erupt = t.hole = 0;
-  if (by && by !== t) { by.kills++; by.charge = Math.min(1, by.charge + P.killCharge); }
   ev("ko", { e: t.e, x: r2(t.x), y: r2(t.y) });
+  if (by && by !== t) {
+    by.kills++; by.charge = Math.min(1, by.charge + P.killCharge);
+    if (by.alive) by.hp = Math.min(100, by.hp + P.stealHeal);
+    const d = disc(t.x, t.y, P.stealR);
+    let n = 0;
+    for (let k = 0; k < N; k++) if (d[k] && S.owner[k] === t.e && !lockedAt(k)) { own(k, by.e); n++; }
+    ev("steal", { e: by.e, v: t.e, x: r2(t.x), y: r2(t.y), n });
+  }
 }
 function revive(b) {
   const opts = [];
@@ -954,7 +965,7 @@ function snapshot(meta) {
     (b.stun > 0 ? 1 : 0) | (b.bigT > 0 ? 2 : 0) | (b.invuln > 0 ? 4 : 0) | (b.surge > 0 ? 8 : 0) | (b.phaseT > 0 ? 16 : 0) |
     (b.rushT > 0 ? 32 : 0) | (b.slowT > 0 ? 64 : 0) | (b.hasteT > 0 ? 128 : 0), r2(Math.max(0, b.hole)),
     r2(b.hx), r2(b.hy), r2(b.sx), r2(b.sy), r2(b.dx), r2(b.dy), b.powers, b.kills, b.name || "", b.pid || ""]);
-  return Object.assign({ t: r2(S.t), rx: S.reactions, pu: r2(S.promptUntil), o, g: gs, f: anyFade ? f : "", b: bs,
+  return Object.assign({ t: r2(S.t), rx: S.reactions, pu: r2(S.promptUntil), fin: S.final ? 1 : 0, o, g: gs, f: anyFade ? f : "", b: bs,
     c: S.clones.map(c => [r2(c.x), r2(c.y), c.e]), k: S.bombs.map(q => [r2(q.x), r2(q.y), r2(q.t - S.t)]),
     u: S.bubbles.map(q => [r2(q.x), r2(q.y), q.e]) }, meta);
 }
@@ -967,7 +978,9 @@ class Game {
   steer(e, dx, dy) { S = this.S; const b = S.by[e]; if (b) steer(b, dx, dy); }
   redirect(e, dx, dy) {
     S = this.S; const b = S.by[e];
-    if (!b || !b.alive || S.t > S.promptUntil) return;
+    if (!b || !b.alive) return;
+    if (S.final) { if (S.t - (b.dirAt || -9) < P.finalDirCd) return; b.dirAt = S.t; }
+    else if (S.t > S.promptUntil) return;
     steer(b, dx, dy);
     const [tx, ty] = ahead(b, 5);
     ev("redirect", { e: b.e, x: r2(b.x), y: r2(b.y), tx: r2(tx), ty: r2(ty) });
@@ -986,7 +999,7 @@ function pickFree(used) {
 function recountState(st) { const keep = S; S = st; recount(); S = keep; }
 
 export {
-  W, H, N, DT, ROUND, NEL, FIRE, ICE, PLANT, BOLT, WATER, EARTH, WIND, POISON, METAL, SUN, SAND, LAVA, SLIME, VOID, CRYSTAL,
+  W, H, N, DT, ROUND, FINAL, NEL, FIRE, ICE, PLANT, BOLT, WATER, EARTH, WIND, POISON, METAL, SUN, SAND, LAVA, SLIME, VOID, CRYSTAL,
   MUSHROOM, SMILEY, SIX7, GAS, SOUND, YINYANG, TIME, GHOST, BOMB, BUBBLE, GLITCH, CANDY, TITLE, WORD, ABOUT, STRONG, WEAK, LAYERS, TOP, P, rnd, irnd, pick, shuffle, r2, rayCells, cellOf,
   newBall, Game, pickFree, recountState, seedRandom,
 };

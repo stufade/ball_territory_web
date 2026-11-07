@@ -25,6 +25,7 @@ function client(name, pickE) {
       if (m.ph === "aim" && !c.launched) { c.launched = true; send({ t: "launch", d: [0.6, 0.8] }); }
       if (m.ph === "play" && mine[5] && mine[6] >= 1 && now - (c.pressAt || 0) > 400) { c.pressAt = now; c.presses++; send({ t: "press" }); }
       if (m.ph === "play" && m.pu > m.time && !c.dirFor?.[m.pu]) { c.dirFor = { [m.pu]: 1 }; c.dirs++; send({ t: "dir", dx: -mine[13], dy: mine[14] }); }
+      if (m.ph === "play" && m.fin && m.time - (c.finAt || 0) > .5) { c.finAt = m.time; c.dirs++; send({ t: "dir", dx: Math.random() - .5, dy: Math.random() - .5 }); }
     };
     ws.onerror = e => console.log(name, "error", e.message || e);
   });
