@@ -6,11 +6,12 @@ import path from "path";
 import puppeteer from "puppeteer-core";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const out = process.argv[2] || "shots", what = process.argv[3] || "all";
+const out = process.argv[2] || "shots", what = process.argv[3] || "all", live = process.argv[4] || "";
 fs.mkdirSync(out, { recursive: true });
 let html = fs.readFileSync(path.join(root, "public/index.html"), "utf8");
 const tail = "requestAnimationFrame(frame);\n</script>";
-html = html.replace(tail, `window.T = { startSolo, startWin, startTutorial, get S() { return S; }, get phase() { return phase; }, get tut() { return tut; }, get D() { return D; }, get DR() { return DR; }, get game() { return game; }, chooseSpots, tutBush, fx, N };\n` + tail);
+if (live) html = html.replace("<head>", `<head><script>window.BT_WS = ${JSON.stringify(live.replace(/^http/, "ws"))};</script>`);
+html = html.replace(tail, `window.T = { startSolo, startWin, startTutorial, get S() { return S; }, get phase() { return phase; }, get tut() { return tut; }, get D() { return D; }, get DR() { return DR; }, get game() { return game; }, chooseSpots, connect, send, chooseBall, draftPick, mySide, net, tutBush, fx, N };\n` + tail);
 const files = { "/": html, "/game.js": fs.readFileSync(path.join(root, "public/game.js")), "/choose.mp3": fs.readFileSync(path.join(root, "public/choose.mp3")) };
 const server = http.createServer((req, res) => {
   const p = req.url.split("?")[0];
@@ -91,6 +92,46 @@ if (what === "duel" || what === "all") {
   }
   for (let i = 0; i < 60 && (await ph()) !== "end"; i++) await wait(100);
   await wait(3600); await shot("d7-end"); console.log("winner", await page.evaluate(() => T.D.winner), "choose screens", shotChoose);
+}
+if (what === "online-duel") {
+  // настоящий клиент в Chrome против соперника по сети: после выбора шара не должен снова всплывать итог раунда
+  const code = Math.random().toString(36).slice(2, 6).replace(/[^a-z0-9]/g, "x");
+  const ws = new WebSocket(`${live.replace(/^http/, "ws")}/ws?room=${code}`);
+  const opp = { me: "" }, osend = m => ws.readyState === 1 && ws.send(JSON.stringify(m));
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.t === "you") opp.me = m.id;
+    if (m.t === "duel") {
+      const side = m.pids.indexOf(opp.me);
+      if (m.ph === "draft" && m.draft.turn === side) { const tk = [...m.draft.teams[0], ...m.draft.teams[1]]; setTimeout(() => osend({ t: "dpick", e: [...Array(27).keys()].filter(q => !tk.includes(q)).at(-1) }), 300); }
+      if (m.ph === "choose" && m.dm && m.dm.cur[side] < 0) { const l = m.dm.teams[side].filter(q => !m.dm.lost[side].includes(q)); setTimeout(() => osend({ t: "dchoose", e: l[0] }), 400); }
+    }
+    if (m.t === "s" && m.s.ph === "aim" && opp.m !== m.s.m) { opp.m = m.s.m; osend({ t: "launch", d: [.6, .8] }); }
+  };
+  await page.evaluate(c => T.connect(c), code); await wait(1500);
+  await new Promise(r => { if (ws.readyState === 1) r(); else ws.onopen = r; });
+  osend({ t: "hello", name: "Rival", cid: "testrival" }); await wait(800);
+  await page.evaluate(() => { T.send({ t: "mode", m: "duel" }); }); await wait(400);
+  await page.evaluate(() => { T.send({ t: "start" }); });
+  const seq = [], t0 = Date.now(); let shots = 0, chooseFor = -1;
+  while (Date.now() - t0 < 260000) {
+    const st = await page.evaluate(() => ({ ph: T.phase, turn: T.DR && T.DR.draft ? T.DR.draft.turn : -9, side: T.mySide(), dm: T.DR && T.DR.dm, D: T.D && { done: T.D.done, round: T.D.round } }));
+    if (seq.at(-1) !== st.ph) seq.push(st.ph);
+    if (st.ph === "ddraft" && st.turn === st.side) { await page.evaluate(() => { const tk = [...T.DR.draft.teams[0], ...T.DR.draft.teams[1]]; T.draftPick([...Array(27).keys()].find(q => !tk.includes(q))); }); await wait(300); }
+    if (st.ph === "dchoose" && st.dm && st.dm.cur[st.side] < 0 && chooseFor !== st.dm.round) {
+      chooseFor = st.dm.round; await wait(1500);  // человек смотрит на экран, в это время раньше всплывал итог раунда
+      if (shots++ < 2) await shot(`o-choose-${shots}`);
+      const ph2 = await page.evaluate(() => T.phase); if (ph2 !== "dchoose") console.log("BUG: choose screen replaced by", ph2);
+      await page.evaluate(() => { const s = T.mySide(), dm = T.DR.dm; T.chooseBall(dm.teams[s].find(q => !dm.lost[s].includes(q))); });
+    }
+    if (st.ph === "aim") { await page.mouse.move(360 * k, 500 * k); await page.mouse.down(); await page.mouse.up(); }
+    if (st.ph === "end") break;
+    await wait(100);
+  }
+  const s2 = seq.join(">");
+  console.log("client phases:", s2);
+  console.log("choose followed by round result (bug):", /dchoose>rend/.test(s2));
+  ws.close();
 }
 if (what === "win" || what === "all") {
   for (let e = +(process.env.FROM || 0); e < 27; e++) {
