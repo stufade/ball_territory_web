@@ -18,8 +18,15 @@ const ABOUT = [
   "Jump into the biggest rival zone and corrupt it.", "A sugar rush: faster and wider paint.",
 ];
 // кто против кого: доля встреч, где стихия закончила выше, по 6000 раундам ботов (test/balance.mjs; не ниже 60% и не выше 40%)
-const STRONG = [[7,15,10],[6],[15,10,6],[18,1,20],[10,11,6],[1,11,4],[7,10],[15],[1,11,13],[1,7,14],[13,3,15],[15,10,21],[7,1,6],[12,7],[1,10,6],[21,26],[14,26,12],[5,13,4],[],[1,14,13],[0,13,6],[10,1,26],[12,7,15],[11,13,26],[15,13,4],[14,5],[]];
-const WEAK = [[20,16,24],[9,19,5],[0,11,22],[17,24,22],[24,5,17],[17,25,24],[22,9,17],[6,0,22],[24,17,16],[24,11],[21,6,0],[23,5,8],[22,13,24],[24,17,22],[25,16,19],[11,2,0],[],[22],[3,0,24],[24,16],[16,17,24],[24,17,11],[],[17,24,16],[],[24,16,17],[24,22,16]];
+const STRONG = [[15,10,7],[11,25,2],[15,10],[18,1,0],[10,11,0],[1,11,4],[10,7,0],[15,2,4],[11,1,0],[1,7,14],[8,5,17],[15,10,18],[7,4,3],[12,11,6],[10,1,3],[16,26,8],[14,0,4],[5,4,8],[25,17,14],[14,1],[0,4],[10,1,6],[12,7],[11,5,21],[4,19,21],[14,5],[0,4,11]];
+const WEAK = [[8,16,20],[5,21,3],[7,0,1],[14,7,12],[7,24,17],[17,25,24],[21,13,4],[22,6,12],[17,10,15],[12,24,18],[21,0,6],[23,8,5],[22,13],[1,10],[16,25,19],[7,2,0],[15,24],[7,18,10],[3,0,11],[24,7],[],[24,8,23],[1],[],[7],[18,24,1],[15,24,7]];
+// скорость заряда силы у каждой стихии (1 - обычная); подбирается тестом test/tune.mjs
+const PACE = [0.45,2.2,0.46,0.89,0.88,0.87,1.88,2.18,1.24,0.66,1.42,0.61,1.46,2.09,1,1.67,0.75,0.6,1.35,0.77,1.28,1,0.62,1,0.58,0.89,1.35];
+// в дуэли 1 на 1 сила шаров ощущается иначе, поэтому свой набор (test/tune.mjs duel)
+const DUEL_PACE = [0.61,1.65,0.46,1.51,0.88,0.68,3,1.3,0.95,0.53,0.93,0.49,1.46,2.09,1.33,1.67,0.75,0.6,1.35,1.32,0.96,1,1.13,1,0.58,1.62,1.35];
+// то же для дуэли 1 на 1 (test/duel-table.mjs): не ниже 65% и не выше 35% раундов
+const DSTRONG = [[10,15,18],[2,6,13],[10,15,4],[1,18,9],[0,10,22],[1,6,11],[10,7,17],[15,17,19],[1,11,0],[1,7,14],[3,9,22],[15,2,10],[7,4,0],[2,12,6],[1,10,3],[16,26,6],[14,0,4],[5,4,8],[2,6,9],[14,9,22],[0,4,11],[1,10,3],[12,7,15],[11,18,3],[0,4,2],[14,5,8],[0,19,2]];
+const DWEAK = [[4,20,24],[3,5,9],[1,13,18],[10,14,21],[12,20,24],[10,17,25],[5,1,14],[12,0,6],[10,4,7],[10,19,3],[0,2,6],[5,23,8],[22,10,13],[1,18,5],[16,19,25],[0,2,7],[15,1,5],[7,10,23],[0,3,23],[7,10,26],[9,6,13],[2,7,15],[10,1,4],[10,15],[1,10,5],[7,1,4],[10,15,1]];
 const LAYERS = ["water", "ice", "bush", "burn", "toxic", "sand", "lava", "slime", "rock", "glass", "shock", "gas"];
 const HARD = ["ice", "rock", "glass", "water", "shock", "toxic", "lava", "burn", "slime", "gas"];
 const TOP = ["shock", "burn", "gas", "lava", "toxic", "slime", "water", "ice", "glass", "rock", "sand", "bush"];
@@ -177,15 +184,17 @@ function newBall(e, x, y, ctl) {
     bigT: 0, hitCd: new Array(NEL).fill(0), powers: 0, kills: 0, redirectAt: 0, ctl };
 }
 // ctl: "me" - этот браузер, peer-строка - игрок из комнаты, null - бот
-function newMatch(seats) {
-  const players = seats.map(s => s.e);
+// opts.round - длина раунда в секундах (дуэль короче); финал - последние 15 с, в коротком раунде 10 с
+function newMatch(seats, opts = {}) {
+  const players = seats.map(s => s.e), round = opts.round || ROUND;
   S = { tick: 0, t: 0, owner: new Int8Array(N).fill(-1), src: new Int8Array(N).fill(-1), L: {}, fade: new Float32Array(N),
     burnFlam: new Uint8Array(N), flash: new Float32Array(N), players, balls: [], by: {}, counts: new Array(NEL).fill(0),
     acc: { WILDFIRE: [0, 0, false, 0, 0, -1], BLOOM: [0, 0, false, 0, 0, -1] }, cd: {}, wildNext: 0, reactions: 0,
     seen: {}, done: false, cut: {}, pods: [], nextPrompt: P.promptEvery, promptUntil: -1,
-    events: [], evId: 0, slow: 0, clones: [], six: [], bombs: [], bubbles: [] };
+    events: [], evId: 0, slow: 0, clones: [], six: [], bombs: [], bubbles: [], round, finalAt: round - (round <= 30 ? 10 : 15), pace: opts.pace || PACE };
   for (const n of LAYERS) S.L[n] = new Float32Array(N);
-  const spots = shuffle([[4, 5], [16, 5], [4, 19], [16, 19]]), start = Math.max(0, 1 - P.flightCells / P.chargeCells);
+  // двое стартуют по диагонали, чтобы никому не досталось лучшее место
+  const spots = seats.length === 2 ? shuffle([[[4, 5], [16, 19]], [[16, 5], [4, 19]]])[0] : shuffle([[4, 5], [16, 5], [4, 19], [16, 19]]), start = Math.max(0, 1 - P.flightCells / P.chargeCells);
   seats.forEach((st, i) => {
     const b = newBall(st.e, spots[i][0], spots[i][1], st.ctl);
     b.charge = start; S.balls.push(b); S.by[st.e] = b; S.cut[st.e] = 0;
@@ -243,8 +252,8 @@ function step() {
   S.tick++; S.t = S.tick * DT;
   for (const b of S.balls) { b.px = b.x; b.py = b.y; b.pang = b.ang; }
   if (S.tick % 3 === 0) timers(DT * 3);
-  if (!S.final && S.t >= FINAL) { S.final = true; S.promptUntil = -1; ev("final"); }
-  if (S.t >= S.nextPrompt && S.t + P.promptLen < FINAL) {
+  if (!S.final && S.t >= S.finalAt) { S.final = true; S.promptUntil = -1; ev("final"); }
+  if (S.t >= S.nextPrompt && S.t + P.promptLen < S.finalAt) {
     S.nextPrompt += P.promptEvery; S.promptUntil = S.t + P.promptLen;
     ev("prompt", { until: r2(S.promptUntil) });
     for (const b of S.balls) b.redirectAt = b.ctl ? 0 : S.t + rnd(.5, 1.7);
@@ -264,7 +273,7 @@ function step() {
   if (S.tick % 4 === 0) fireStep();
   if (S.tick % 6 === 0) plantStep();
   recount();
-  if (S.tick >= ROUND / DT) S.done = true;
+  if (S.tick >= S.round / DT) S.done = true;
 }
 function timers(dt) {
   for (const n of LAYERS) {
@@ -334,7 +343,7 @@ function collide() {
 function gain(b, n) {
   const cs = S.players.map(e => S.counts[e]), lo = Math.min(...cs), hi = Math.max(1, ...cs);
   const lag = S.counts[b.e] === lo ? 1 - S.counts[b.e] / hi : 0, was = b.charge;
-  b.charge = Math.min(1, b.charge + n / P.chargeCells * (1 + P.behindCharge * lag));
+  b.charge = Math.min(1, b.charge + n / P.chargeCells * S.pace[b.e] * (1 + P.behindCharge * lag));
   if (b.ctl && was < 1 && b.charge >= 1) ev("ready", { e: b.e });
 }
 function paint(b, enemy) {
@@ -965,14 +974,14 @@ function snapshot(meta) {
     (b.stun > 0 ? 1 : 0) | (b.bigT > 0 ? 2 : 0) | (b.invuln > 0 ? 4 : 0) | (b.surge > 0 ? 8 : 0) | (b.phaseT > 0 ? 16 : 0) |
     (b.rushT > 0 ? 32 : 0) | (b.slowT > 0 ? 64 : 0) | (b.hasteT > 0 ? 128 : 0), r2(Math.max(0, b.hole)),
     r2(b.hx), r2(b.hy), r2(b.sx), r2(b.sy), r2(b.dx), r2(b.dy), b.powers, b.kills, b.name || "", b.pid || ""]);
-  return Object.assign({ t: r2(S.t), rx: S.reactions, pu: r2(S.promptUntil), fin: S.final ? 1 : 0, o, g: gs, f: anyFade ? f : "", b: bs,
+  return Object.assign({ t: r2(S.t), rx: S.reactions, pu: r2(S.promptUntil), fin: S.final ? 1 : 0, rd: S.round, fa: S.finalAt, o, g: gs, f: anyFade ? f : "", b: bs,
     c: S.clones.map(c => [r2(c.x), r2(c.y), c.e]), k: S.bombs.map(q => [r2(q.x), r2(q.y), r2(q.t - S.t)]),
     u: S.bubbles.map(q => [r2(q.x), r2(q.y), q.e]) }, meta);
 }
 
 // ---- обёртка: у каждой комнаты свой матч, S переключается на время вызова --
 class Game {
-  constructor(seats) { newMatch(seats); this.S = S; }
+  constructor(seats, opts) { newMatch(seats, opts); this.S = S; }
   step() { S = this.S; step(); }
   press(e) { S = this.S; const b = S.by[e]; if (b) press(b); }
   steer(e, dx, dy) { S = this.S; const b = S.by[e]; if (b) steer(b, dx, dy); }
@@ -989,6 +998,32 @@ class Game {
   drain() { const e = this.S.events; this.S.events = []; return e; }
   snapshot(meta) { S = this.S; return snapshot(meta); }
 }
+// ---- дуэль: у каждой стороны 3 шара по очереди. Проиграл раунд - выходит следующий шар, победитель остаётся.
+// Кончились шары - проиграл дуэль. Ничья в раунде забирает по шару у обоих.
+const DUEL_ROUND = 30, DUEL_SIZE = 3;
+class Duel {
+  constructor(teams, ctls) {
+    this.teams = teams.map(t => t.slice(0, DUEL_SIZE)); this.ctls = ctls.slice();
+    this.idx = [0, 0]; this.round = 0; this.log = []; this.done = false; this.winner = -1; this.game = null;
+  }
+  cur(side) { return this.teams[side][Math.min(DUEL_SIZE - 1, this.idx[side])]; }
+  newRound() {
+    this.round++;
+    this.game = new Game([0, 1].map(i => ({ e: this.cur(i), ctl: this.ctls[i] })), { round: DUEL_ROUND, pace: DUEL_PACE });
+    return this.game;
+  }
+  endRound() {
+    const S = this.game.S, a = this.cur(0), b = this.cur(1), ca = S.counts[a], cb = S.counts[b];
+    const win = ca > cb ? 0 : cb > ca ? 1 : -1;
+    this.log.push([a, b, win, r2(ca / N * 100), r2(cb / N * 100)]);
+    if (win !== 0) this.idx[0]++;
+    if (win !== 1) this.idx[1]++;
+    const outA = this.idx[0] >= DUEL_SIZE, outB = this.idx[1] >= DUEL_SIZE;
+    if (outA || outB) { this.done = true; this.winner = outA && outB ? -1 : outA ? 1 : 0; }
+    return win;
+  }
+  meta() { return { teams: this.teams, idx: this.idx.slice(), round: this.round, log: this.log, done: this.done, winner: this.winner }; }
+}
 // случайные стихии ботов: без повторов и без пары похожих цветов
 const CLASH = [[BOLT, SMILEY], [FIRE, SIX7], [MUSHROOM, GAS], [GAS, BOMB], [SLIME, SOUND], [WATER, TIME], [POISON, TIME],
   [ICE, BUBBLE], [WIND, BUBBLE], [CRYSTAL, BUBBLE], [SUN, GHOST], [PLANT, BOMB]];
@@ -1000,6 +1035,6 @@ function recountState(st) { const keep = S; S = st; recount(); S = keep; }
 
 export {
   W, H, N, DT, ROUND, FINAL, NEL, FIRE, ICE, PLANT, BOLT, WATER, EARTH, WIND, POISON, METAL, SUN, SAND, LAVA, SLIME, VOID, CRYSTAL,
-  MUSHROOM, SMILEY, SIX7, GAS, SOUND, YINYANG, TIME, GHOST, BOMB, BUBBLE, GLITCH, CANDY, TITLE, WORD, ABOUT, STRONG, WEAK, LAYERS, TOP, P, rnd, irnd, pick, shuffle, r2, rayCells, cellOf,
-  newBall, Game, pickFree, recountState, seedRandom,
+  MUSHROOM, SMILEY, SIX7, GAS, SOUND, YINYANG, TIME, GHOST, BOMB, BUBBLE, GLITCH, CANDY, TITLE, WORD, ABOUT, STRONG, WEAK, DSTRONG, DWEAK, LAYERS, TOP, P, rnd, irnd, pick, shuffle, r2, rayCells, cellOf,
+  newBall, Game, Duel, DUEL_ROUND, DUEL_SIZE, PACE, DUEL_PACE, pickFree, recountState, seedRandom,
 };

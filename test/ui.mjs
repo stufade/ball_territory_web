@@ -10,7 +10,7 @@ const out = process.argv[2] || "shots", what = process.argv[3] || "all";
 fs.mkdirSync(out, { recursive: true });
 let html = fs.readFileSync(path.join(root, "public/index.html"), "utf8");
 const tail = "requestAnimationFrame(frame);\n</script>";
-html = html.replace(tail, `window.T = { startSolo, startWin, startTutorial, get S() { return S; }, get phase() { return phase; }, get tut() { return tut; }, tutBush, fx, N };\n` + tail);
+html = html.replace(tail, `window.T = { startSolo, startWin, startTutorial, get S() { return S; }, get phase() { return phase; }, get tut() { return tut; }, get D() { return D; }, get game() { return game; }, tutBush, fx, N };\n` + tail);
 const files = { "/": html, "/game.js": fs.readFileSync(path.join(root, "public/game.js")), "/choose.mp3": fs.readFileSync(path.join(root, "public/choose.mp3")) };
 const server = http.createServer((req, res) => {
   const p = req.url.split("?")[0];
@@ -53,6 +53,26 @@ if (what === "tut" || what === "all") {
   await tap(200, 400); await wait(300); await tap(500, 800); await wait(300);
   for (let i = 0; i < 100 && (await page.evaluate(() => T.phase)) !== "end"; i++) await wait(200);
   for (const [ms, n] of [[300, "11-end-time"], [900, "12-end-sig"], [900, "13-end-crown"], [1500, "14-end-full"]]) { await wait(ms); await shot(n); }
+}
+if (what === "duel" || what === "all") {
+  await page.goto(page.url().split("?")[0], { waitUntil: "networkidle0" }); await page.waitForFunction("window.T");
+  await tap(484, 872); await wait(400); await shot("d0-pick-empty");
+  for (const e of [0, 13, 24]) { const row = e / 5 | 0, inRow = Math.min(5, 27 - row * 5); await tap(88 + (5 - inRow) * 68 + (e % 5) * 136, 330 + row * 100); }
+  await wait(300); await shot("d1-pick-full");
+  await tap(360, 1136); await wait(600); await shot("d2-aim"); console.log("phase", await page.evaluate(() => T.phase), JSON.stringify(await page.evaluate(() => T.D.teams)));
+  await page.mouse.move(360 * k, 500 * k); await page.mouse.down(); await page.mouse.move(420 * k, 420 * k, { steps: 3 }); await page.mouse.up(); await wait(3000); await shot("d3-play");
+  for (let r = 0; r < 6; r++) {
+    // перематываем раунд до конца, дальше игра сама показывает итог раунда
+    await page.evaluate(() => { const g = T.game, S = T.S; while (S.t < S.round - .2) { g.step(); g.drain(); } });
+    for (let i = 0; i < 30 && !["rend", "end"].includes(await page.evaluate(() => T.phase)); i++) await wait(100);
+    await wait(1600); const ph = await page.evaluate(() => T.phase);
+    await shot(`d4-round${r + 1}-${ph}`); console.log("round", r + 1, ph, JSON.stringify(await page.evaluate(() => T.D.log.at(-1))), JSON.stringify(await page.evaluate(() => T.D.idx)));
+    if (await page.evaluate(() => T.D.done)) break;
+    for (let i = 0; i < 50 && (await page.evaluate(() => T.phase)) !== "aim"; i++) await wait(100);
+    await page.mouse.move(360 * k, 500 * k); await page.mouse.down(); await page.mouse.up(); await wait(400);
+  }
+  for (let i = 0; i < 60 && (await page.evaluate(() => T.phase)) !== "end"; i++) await wait(100);
+  await wait(3600); await shot("d5-end"); console.log("winner", await page.evaluate(() => T.D.winner));
 }
 if (what === "win" || what === "all") {
   for (let e = +(process.env.FROM || 0); e < 27; e++) {

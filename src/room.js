@@ -1,12 +1,14 @@
 // Одна комната = один Durable Object. Бой считает сервер, телефоны только рисуют и шлют нажатия.
 // Пока в комнате просто ждут, объект может уснуть (WebSocket Hibernation): данные игроков лежат во вложениях сокетов.
 import { DurableObject } from "cloudflare:workers";
-import { Game, NEL, N, DT, pickFree } from "../public/game.js";
+import { Game, Duel, DUEL_SIZE, NEL, N, DT, pickFree } from "../public/game.js";
 
 const TICK_MS = 33;        // шаг цикла
 const SNAP_MS = 66;        // снимок боя 15 раз в секунду
 const AIM_LIMIT = 10;      // секунд на прицел
 const SEATS = 4;
+const ROUND_PAUSE = 3500;  // мс между раундами дуэли
+const seatsFor = mode => mode === "duel" ? 2 : SEATS;
 const SKIP = new Set(["wall"]);
 
 const num = v => (Number.isFinite(+v) ? Math.max(-50, Math.min(50, +v)) : 0);
@@ -17,6 +19,9 @@ export class Room extends DurableObject {
     super(ctx, env);
     this.game = null;
     this.phase = "lobby";
+    this.mode = "ffa";      // ffa - каждый за себя на 4, duel - 1 на 1, по 3 шара
+    this.duel = null;
+    this.sides = [];
     this.matchId = 0;
     this.seats = [];        // [{id, e, name}] того матча, что идёт
     this.launched = new Set();
@@ -43,9 +48,9 @@ export class Room extends DurableObject {
   send(ws, msg) { try { ws.send(JSON.stringify(msg)); } catch (e) { /* сокет закрылся */ } }
   broadcast(msg) { const s = JSON.stringify(msg); for (const ws of this.ctx.getWebSockets()) { try { ws.send(s); } catch (e) { /* закрыт */ } } }
   lobbyMsg() {
-    const ps = this.people(), players = ps.slice(0, SEATS);
-    return { t: "lobby", phase: this.phase, host: players[0] ? players[0].a.id : "",
-      seats: players.map(p => ({ id: p.a.id, name: p.a.name, e: p.a.e })), watching: Math.max(0, ps.length - SEATS) };
+    const ps = this.people(), cap = seatsFor(this.mode), players = ps.slice(0, cap);
+    return { t: "lobby", phase: this.phase, mode: this.mode, host: players[0] ? players[0].a.id : "",
+      seats: players.map(p => ({ id: p.a.id, name: p.a.name, e: p.a.e, team: p.a.team || [] })), watching: Math.max(0, ps.length - cap) };
   }
   sendLobby() { this.broadcast(this.lobbyMsg()); }
 
@@ -56,7 +61,7 @@ export class Room extends DurableObject {
     if (!m || typeof m !== "object") return;
     const a = ws.deserializeAttachment() || {};
     const save = () => ws.serializeAttachment(a);
-    const players = this.people().slice(0, SEATS), isHost = players[0] && players[0].a.id === a.id;
+    const players = this.people().slice(0, seatsFor(this.mode)), isHost = players[0] && players[0].a.id === a.id;
     const seat = this.game ? this.seats.find(s => s.id === a.id) : null;
     switch (m.t) {
       case "hello":
@@ -79,6 +84,20 @@ export class Room extends DurableObject {
         a.e = e; save(); this.sendLobby();
         break;
       }
+      case "team": {  // дуэль: до 3 разных шаров по порядку, без шаров соперника
+        if (this.phase !== "lobby" && this.phase !== "end") return;
+        const other = players.filter(p => p.a.id !== a.id).flatMap(p => p.a.team || []);
+        const team = [];
+        for (const v of Array.isArray(m.team) ? m.team : []) {
+          const e = v | 0;
+          if (e >= 0 && e < NEL && !team.includes(e) && !other.includes(e) && team.length < DUEL_SIZE) team.push(e);
+        }
+        a.team = team; save(); this.sendLobby();
+        break;
+      }
+      case "mode":
+        if (isHost && (this.phase === "lobby" || this.phase === "end")) { this.mode = m.m === "duel" ? "duel" : "ffa"; this.sendLobby(); }
+        break;
       case "start":
         if (isHost && (this.phase === "lobby" || this.phase === "end")) {
           try { this.start(); } catch (e) { console.error("start failed", e && e.stack); this.broadcast({ t: "error", msg: "start failed" }); }
@@ -115,6 +134,8 @@ export class Room extends DurableObject {
     if (this.game) {
       const s = this.seats.find(q => q.id === a.id);
       if (s) { const b = this.game.S.by[s.e]; if (b) { b.ctl = null; b.name = (b.name || "") + " (BOT)"; } s.id = ""; }
+      const side = this.sides.findIndex(q => q.id && q.id === a.id);
+      if (side >= 0 && this.duel) { this.sides[side].id = ""; this.sides[side].name += " (BOT)"; this.duel.ctls[side] = null; }
     }
     const alive = this.ctx.getWebSockets().filter(w => w !== ws);
     if (!alive.length) this.stop();
@@ -123,6 +144,8 @@ export class Room extends DurableObject {
 
   // ---- матч ---------------------------------------------------------------
   start() {
+    if (this.mode === "duel") return this.startDuel();
+    this.duel = null; this.sides = [];
     const players = this.people().slice(0, SEATS), used = players.map(p => p.a.e).filter(e => e >= 0);
     const seats = players.map(p => {
       let e = p.a.e;
@@ -145,6 +168,26 @@ export class Room extends DurableObject {
     this.sendLobby();
     this.last = Date.now(); this.acc = 0; this.snapAt = 0;
     if (!this.timer) this.timer = setInterval(() => { try { this.tick(); } catch (e) { console.error("tick failed", e && e.stack); this.stop(); } }, TICK_MS);
+  }
+  startDuel() {
+    const used = [];
+    const sides = this.people().slice(0, 2).map(p => ({ id: p.a.id, name: p.a.name || "Player", cid: p.a.cid || "", auto: p.a.auto, prompts: p.a.prompts,
+      team: (p.a.team || []).slice(0, DUEL_SIZE) }));
+    while (sides.length < 2) sides.push({ id: "", name: "BOT", cid: "", team: [] });
+    for (const s of sides) { s.team = s.team.filter(e => !used.includes(e)); used.push(...s.team); }
+    for (const s of sides) while (s.team.length < DUEL_SIZE) { const e = pickFree(used); used.push(e); s.team.push(e); }
+    this.sides = sides;
+    this.duel = new Duel(sides.map(s => s.team), sides.map(s => s.id || null));
+    this.duelRound();
+    this.sendLobby();
+    if (!this.timer) this.timer = setInterval(() => { try { this.tick(); } catch (e) { console.error("tick failed", e && e.stack); this.stop(); } }, TICK_MS);
+  }
+  duelRound() {
+    const g = this.game = this.duel.newRound();
+    this.seats = this.sides.map((s, i) => ({ id: s.id, e: this.duel.cur(i), name: s.name, auto: s.auto, prompts: s.prompts, cid: s.cid }));
+    for (const s of this.seats) { const b = g.S.by[s.e]; b.name = s.name; b.pid = s.id; b.auto = !!s.auto; b.prompts = s.prompts !== false; }
+    this.matchId++; this.phase = "aim"; this.launched = new Set(); this.aimAt = Date.now(); g.drain();
+    this.last = Date.now(); this.acc = 0; this.snapAt = 0;
   }
   stop() {
     if (this.timer) clearInterval(this.timer);
@@ -172,14 +215,21 @@ export class Room extends DurableObject {
         this.acc -= DT; n++;
         if (S.slow > 0) S.slow -= DT;
         g.step();
-        if (S.done) { this.phase = "end"; break; }
+        if (S.done) {
+          if (this.duel) { this.duel.endRound(); this.record(); this.phase = "rend"; this.rendAt = now; }
+          else this.phase = "end";
+          break;
+        }
       }
+    } else if (this.phase === "rend" && now - this.rendAt > ROUND_PAUSE) {
+      if (this.duel.done) this.phase = "end";
+      else this.duelRound();
     }
     if (now - this.snapAt >= SNAP_MS || this.phase === "end") {
       this.snapAt = now;
       this.broadcast({ t: "s", s: this.snap(false) });
     }
-    if (this.phase === "end") { this.stop(); this.sendLobby(); this.record(); }
+    if (this.phase === "end") { this.stop(); this.sendLobby(); if (!this.duel) this.record(); }
   }
   // итог матча в общую статистику; сбой статистики не мешает игре
   record() {
@@ -188,11 +238,13 @@ export class Room extends DurableObject {
       const seats = this.seats.map(s => ({ e: s.e, human: !!s.id, cid: s.cid || "", place: order.indexOf(s.e) + 1,
         pct: Math.round(S.counts[s.e] / N * 1000) / 10, kills: S.by[s.e].kills, powers: S.by[s.e].powers }));
       const stub = this.env.STATS.get(this.env.STATS.idFromName("all"));
-      this.ctx.waitUntil(stub.match({ mode: "room", reactions: S.reactions, seats }).catch(e => console.error("stats failed", e && e.message)));
+      this.ctx.waitUntil(stub.match({ mode: this.duel ? "duel" : "room", reactions: S.reactions, seats }).catch(e => console.error("stats failed", e && e.message)));
     } catch (e) { console.error("stats failed", e && e.stack); }
   }
   snap(full) {
     const ev = full ? [] : this.game.drain().filter(q => !SKIP.has(q[1]));  // новичку - без событий, остальным их не теряем
-    return this.game.snapshot({ w: Date.now(), m: this.matchId, ph: this.phase === "end" ? "end" : this.phase === "aim" ? "aim" : "play", ev });
+    const dm = this.duel ? Object.assign(this.duel.meta(), { names: this.sides.map(s => s.name), pids: this.sides.map(s => s.id) }) : undefined;
+    const ph = this.phase === "end" || this.phase === "aim" || this.phase === "rend" ? this.phase : "play";
+    return this.game.snapshot({ w: Date.now(), m: this.matchId, ph, ev, dm });
   }
 }

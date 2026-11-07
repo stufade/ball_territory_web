@@ -3,7 +3,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { NEL, TITLE } from "../public/game.js";
 
-const KINDS = new Set(["open", "tut", "solo_start", "solo_end", "tut_end", "room_create", "room_join", "room_start"]);
+const KINDS = new Set(["open", "tut", "solo_start", "solo_end", "tut_end", "room_create", "room_join", "room_start", "duel_start", "duel_round"]);
 export const TUT_STEPS = ["goal", "aim", "paint", "steer", "spikes", "power", "powerOk", "bush", "rx", "rxOk", "final", "play", "done"];
 const day = ts => new Date(ts + 3 * 36e5).toISOString().slice(0, 10);  // дни по Москве
 const int = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(+v) || 0));
@@ -32,7 +32,8 @@ export class Stats extends DurableObject {
     if (m.kind === "tut") v = TUT_STEPS.includes(m.v) ? m.v : "";
     else if (m.kind === "solo_start" || m.kind === "room_start") v = String(int(m.v, 0, NEL - 1));
     this.sql.exec("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?)", ts, day(ts), cid, m.kind, v, m.tg ? 1 : 0);
-    if ((m.kind === "solo_end" || m.kind === "tut_end") && Array.isArray(m.seats)) this.match({ mode: m.kind === "tut_end" ? "tut" : "solo", reactions: m.reactions, seats: m.seats, cid });
+    const mode = { solo_end: "solo", tut_end: "tut", duel_round: "duel" }[m.kind];
+    if (mode && Array.isArray(m.seats)) this.match({ mode, reactions: m.reactions, seats: m.seats, cid });
   }
 
   // матч: от комнаты (сервер сам знает итог) или из одиночной игры
@@ -59,6 +60,7 @@ export class Stats extends DurableObject {
         SUM(kind = 'solo_start') AS solo_starts,
         SUM(kind = 'solo_end') AS solo_ends,
         SUM(kind = 'room_create') AS rooms,
+        SUM(kind = 'duel_start') AS duels,
         SUM(kind = 'tut' AND v = 'goal') AS tut_starts,
         SUM(kind = 'tut' AND v = 'done') AS tut_done
       FROM events WHERE day >= ? GROUP BY day ORDER BY day DESC`, since);
@@ -71,12 +73,14 @@ export class Stats extends DurableObject {
         AVG(CASE WHEN human THEN place END) AS human_place,
         COUNT(*) AS seats,
         SUM(place = 1) AS wins
-      FROM seats s JOIN matches m ON m.id = s.match WHERE m.mode != 'tut' GROUP BY e`);
+      FROM seats s JOIN matches m ON m.id = s.match WHERE m.mode IN ('solo', 'room') GROUP BY e`);
+    const duel = new Map(q(`SELECT e, COUNT(*) AS n, SUM(place = 1) AS w FROM seats s JOIN matches m ON m.id = s.match WHERE m.mode = 'duel' GROUP BY e`).map(r => [r.e, r]));
     const byE = new Map(els.map(r => [r.e, r]));
     const elements = TITLE.map((name, e) => {
       const r = byE.get(e) || { picks: 0, human_wins: 0, human_place: null, seats: 0, wins: 0 };
       return { e, name, picks: r.picks || 0, humanWinPct: r.picks ? Math.round(100 * r.human_wins / r.picks) : null,
-        humanPlace: r.human_place ? +r.human_place.toFixed(2) : null, seats: r.seats, winPct: r.seats ? Math.round(100 * r.wins / r.seats) : null };
+        humanPlace: r.human_place ? +r.human_place.toFixed(2) : null, seats: r.seats, winPct: r.seats ? Math.round(100 * r.wins / r.seats) : null,
+        duelRounds: (duel.get(e) || {}).n || 0, duelWinPct: duel.get(e) ? Math.round(100 * duel.get(e).w / duel.get(e).n) : null };
     });
     const total = q(`SELECT COUNT(DISTINCT cid) AS players, SUM(kind = 'open') AS opens FROM events`)[0];
     const weekPlayers = q("SELECT COUNT(DISTINCT cid) AS n FROM events WHERE day >= ?", week)[0].n;
@@ -124,12 +128,15 @@ th:first-child,td:first-child{text-align:left}
 <div><b>${s.returning}</b><span>вернулись в другой день</span></div>
 <div><b>${s.opens}</b><span>открытий, из них ${s.telegramOpens} в Telegram</span></div>
 <div><b>${(mm.solo || {}).n || 0} / ${(mm.room || {}).n || 0}</b><span>доиграно матчей: одиночных / с друзьями</span></div>
+<div><b>${(mm.duel || {}).n || 0}</b><span>раундов дуэли</span></div>
 </div>
-<h2>По дням (14 дней)</h2><div class="wrap">${table(["День", "Игроков", "Открытий", "Начали одиночный", "Доиграли одиночный", "Комнат", "Матчей с друзьями", "Начали обучение", "Прошли обучение"],
-  s.days.map(d => [d.day, d.players, d.opens, d.solo_starts, d.solo_ends, d.rooms, d.room_matches, d.tut_starts, d.tut_done]))}</div>
+<h2>По дням (14 дней)</h2><div class="wrap">${table(["День", "Игроков", "Открытий", "Начали одиночный", "Доиграли одиночный", "Дуэлей", "Комнат", "Матчей с друзьями", "Начали обучение", "Прошли обучение"],
+  s.days.map(d => [d.day, d.players, d.opens, d.solo_starts, d.solo_ends, d.duels, d.rooms, d.room_matches, d.tut_starts, d.tut_done]))}</div>
 <h2>Обучение: где бросают</h2><p>Сколько игроков дошло до каждого шага.</p><div class="wrap">${table(["Шаг", "Игроков", "От начала"],
   s.tutorial.map(t => [t.step, t.players, first ? Math.round(100 * t.players / first) + "%" : "—"]))}</div>
-<h2>Шары</h2><p>«Выбирали» и «побед у людей» считаются только по людям. «Побед всего» включает ботов. Матчи обучения не входят.</p><div class="wrap">${table(["Шар", "Выбирали", "Побед у людей", "Среднее место у людей", "Побед всего", "Матчей всего"],
-  els.map(r => [r.name, r.picks, r.humanWinPct === null ? "—" : r.humanWinPct + "%", r.humanPlace, r.winPct === null ? "—" : r.winPct + "%", r.seats]))}</div>
+<h2>Шары</h2><p>Первые пять колонок - матчи на четверых: «выбирали» и «побед у людей» только по людям, «побед всего» вместе с ботами (в среднем 25%).
+Дуэль - раунды один на один (в среднем 50%). Обучение не входит.</p><div class="wrap">${table(["Шар", "Выбирали", "Побед у людей", "Среднее место у людей", "Побед всего", "Матчей всего", "Дуэль: раундов", "Дуэль: побед"],
+  els.map(r => [r.name, r.picks, r.humanWinPct === null ? "—" : r.humanWinPct + "%", r.humanPlace, r.winPct === null ? "—" : r.winPct + "%", r.seats,
+    r.duelRounds, r.duelWinPct === null ? "—" : r.duelWinPct + "%"]))}</div>
 </body></html>`;
 }
