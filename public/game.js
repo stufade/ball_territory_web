@@ -23,10 +23,10 @@ const WEAK = [[8,16,20],[5,21,3],[7,0,1],[14,7,12],[7,24,17],[17,25,24],[21,13,4
 // скорость заряда силы у каждой стихии (1 - обычная); подбирается тестом test/tune.mjs
 const PACE = [0.45,2.2,0.46,0.89,0.88,0.87,1.88,2.18,1.24,0.66,1.42,0.61,1.46,2.09,1,1.67,0.75,0.6,1.35,0.77,1.28,1,0.62,1,0.58,0.89,1.35];
 // в дуэли 1 на 1 сила шаров ощущается иначе, поэтому свой набор (test/tune.mjs duel)
-const DUEL_PACE = [0.61,1.65,0.46,1.51,0.88,0.68,3,1.3,0.95,0.53,0.93,0.49,1.46,2.09,1.33,1.67,0.75,0.6,1.35,1.32,0.96,1,1.13,1,0.58,1.62,1.35];
+const DUEL_PACE = [0.79,1.65,0.46,1.51,1.54,0.68,3,0.68,1.25,0.88,0.93,0.39,1.09,2.09,1.33,0.94,1.01,0.78,1.72,1.32,0.72,1.74,0.65,0.95,0.58,1.24,1.82];
 // то же для дуэли 1 на 1 (test/duel-table.mjs): не ниже 65% и не выше 35% раундов
-const DSTRONG = [[10,15,18],[2,6,13],[10,15,4],[1,18,9],[0,10,22],[1,6,11],[10,7,17],[15,17,19],[1,11,0],[1,7,14],[3,9,22],[15,2,10],[7,4,0],[2,12,6],[1,10,3],[16,26,6],[14,0,4],[5,4,8],[2,6,9],[14,9,22],[0,4,11],[1,10,3],[12,7,15],[11,18,3],[0,4,2],[14,5,8],[0,19,2]];
-const DWEAK = [[4,20,24],[3,5,9],[1,13,18],[10,14,21],[12,20,24],[10,17,25],[5,1,14],[12,0,6],[10,4,7],[10,19,3],[0,2,6],[5,23,8],[22,10,13],[1,18,5],[16,19,25],[0,2,7],[15,1,5],[7,10,23],[0,3,23],[7,10,26],[9,6,13],[2,7,15],[10,1,4],[10,15],[1,10,5],[7,1,4],[10,15,1]];
+const DSTRONG = [[7,10,15],[13,4,6],[10,15,21],[1,18,4],[8,11,9],[11,1,4],[7,10],[4,15,3],[11,0,1],[7,1,6],[23,3,22],[15,18,6],[0,6,7],[11,12,7],[1,8,22],[22,26,16],[14,0,4],[5,8,11],[25,13,19],[14,1,2],[0,19,21],[1,10,3],[12,7,20],[11,18],[15,17,0],[5,14,3],[0,4,11]];
+const DWEAK = [[20,8,12],[3,14,21],[0,1,7],[7,10,12],[7,1,5],[25,17,18],[1,11,12],[0,6,9],[4,14,10],[4,8,11],[0,2,21],[5,8,23],[22,13,14],[1,18,10],[16,19,25],[0,2,7],[1,15,7],[15,24,18],[3,11,23],[18,20,4],[7,22,1],[2,7,11],[14,15,10],[10,1,16],[10,25,26],[18,4,15],[15,1,12]];
 const LAYERS = ["water", "ice", "bush", "burn", "toxic", "sand", "lava", "slime", "rock", "glass", "shock", "gas"];
 const HARD = ["ice", "rock", "glass", "water", "shock", "toxic", "lava", "burn", "slime", "gas"];
 const TOP = ["shock", "burn", "gas", "lava", "toxic", "slime", "water", "ice", "glass", "rock", "sand", "bush"];
@@ -107,8 +107,8 @@ let S = null;
 // ---- клетки -------------------------------------------------------------
 function disc(x, y, r) {
   const m = new Uint8Array(N), q = r * r;
-  const x0 = Math.max(0, Math.floor(x - r - 1)), x1 = Math.min(W - 1, Math.ceil(x + r));
-  const y0 = Math.max(0, Math.floor(y - r - 1)), y1 = Math.min(H - 1, Math.ceil(y + r));
+  const x0 = Math.max(S.ax0, Math.floor(x - r - 1)), x1 = Math.min(S.ax1 - 1, Math.ceil(x + r));
+  const y0 = Math.max(S.ay0, Math.floor(y - r - 1)), y1 = Math.min(S.ay1 - 1, Math.ceil(y + r));
   for (let j = y0; j <= y1; j++) for (let i = x0; i <= x1; i++) {
     const dx = i + .5 - x, dy = j + .5 - y;
     if (dx * dx + dy * dy <= q) m[j * W + i] = 1;
@@ -153,11 +153,11 @@ function label(src) {
 const cellOf = b => Math.min(H - 1, Math.max(0, b.y | 0)) * W + Math.min(W - 1, Math.max(0, b.x | 0));
 const hardAt = k => HARD.some(n => S.L[n][k] > 0);
 const lockedAt = k => S.L.rock[k] > 0 || S.L.glass[k] > 0;
-const clampX = x => Math.min(W - P.ballR, Math.max(P.ballR, x));
-const clampY = y => Math.min(H - P.ballR, Math.max(P.ballR, y));
-function own(k, e) { if (S.owner[k] !== e) { S.owner[k] = e; S.flash[k] = 1; } S.fade[k] = 0; }
+const clampX = x => Math.min(S.ax1 - P.ballR, Math.max(S.ax0 + P.ballR, x));
+const clampY = y => Math.min(S.ay1 - P.ballR, Math.max(S.ay0 + P.ballR, y));
+function own(k, e) { if (!S.inA[k]) return; if (S.owner[k] !== e) { S.owner[k] = e; S.flash[k] = 1; } S.fade[k] = 0; }
 function clearCell(k, keep) { for (const n of LAYERS) if (!keep.includes(n)) S.L[n][k] = 0; S.burnFlam[k] = 0; }
-function put(name, m, t, by) { for (let k = 0; k < N; k++) if (m[k]) { S.L[name][k] = t; S.src[k] = by; } }
+function put(name, m, t, by) { for (let k = 0; k < N; k++) if (m[k] && S.inA[k]) { S.L[name][k] = t; S.src[k] = by; } }
 function capture(m, e, clear = true) {
   const got = new Uint8Array(N);
   for (let k = 0; k < N; k++) {
@@ -192,9 +192,15 @@ function newMatch(seats, opts = {}) {
     acc: { WILDFIRE: [0, 0, false, 0, 0, -1], BLOOM: [0, 0, false, 0, 0, -1] }, cd: {}, wildNext: 0, reactions: 0,
     seen: {}, done: false, cut: {}, pods: [], nextPrompt: P.promptEvery, promptUntil: -1,
     events: [], evId: 0, slow: 0, clones: [], six: [], bombs: [], bubbles: [], round, finalAt: round - (round <= 30 ? 10 : 15), pace: opts.pace || PACE };
+  // арена: прямоугольник клеток [ax0, ax1) x [ay0, ay1); у дуэли меньше, чем всё поле
+  const [ax0, ay0, ax1, ay1] = opts.arena || [0, 0, W, H];
+  Object.assign(S, { ax0, ay0, ax1, ay1, inA: new Uint8Array(N) });
+  for (let j = ay0; j < ay1; j++) for (let i = ax0; i < ax1; i++) S.inA[j * W + i] = 1;
+  S.area = (ax1 - ax0) * (ay1 - ay0);
   for (const n of LAYERS) S.L[n] = new Float32Array(N);
   // двое стартуют по диагонали, чтобы никому не досталось лучшее место
-  const spots = seats.length === 2 ? shuffle([[[4, 5], [16, 19]], [[16, 5], [4, 19]]])[0] : shuffle([[4, 5], [16, 5], [4, 19], [16, 19]]), start = Math.max(0, 1 - P.flightCells / P.chargeCells);
+  const L = ax0 + 4, R = ax1 - 4, T = ay0 + 5, B = ay1 - 5;
+  const spots = seats.length === 2 ? shuffle([[[L, T], [R, B]], [[R, T], [L, B]]])[0] : shuffle([[L, T], [R, T], [L, B], [R, B]]), start = Math.max(0, 1 - P.flightCells / P.chargeCells);
   seats.forEach((st, i) => {
     const b = newBall(st.e, spots[i][0], spots[i][1], st.ctl);
     b.charge = start; S.balls.push(b); S.by[st.e] = b; S.cut[st.e] = 0;
@@ -210,12 +216,14 @@ function newMatch(seats, opts = {}) {
 }
 function makeMap() {
   const taken = grow(mask(k => S.owner[k] >= 0));
-  for (const [kind, size] of [["bush", 9], ["water", 6], ["ice", 5], ["sand", 5], ["lava", 3], ["bush", 4]]) {
+  const k0 = Math.min(1, (S.area / N) ** .7);  // на маленькой арене пятна меньше
+  for (const [kind, size0] of [["bush", 9], ["water", 6], ["ice", 5], ["sand", 5], ["lava", 3], ["bush", 4]]) {
+    const size = Math.max(2, Math.round(size0 * k0));
     for (let tries = 0; tries < 60; tries++) {
-      const blob = new Set([irnd(1, W / 2 - 2) + irnd(1, H / 2 - 1) * W]);
+      const blob = new Set([irnd(S.ax0 + 1, W / 2 - 2) + irnd(S.ay0 + 1, H / 2 - 1) * W]);
       while (blob.size < size) {
         const c = pick([...blob]), [dx, dy] = pick([[1, 0], [-1, 0], [0, 1], [0, -1]]), x = c % W + dx, y = (c / W | 0) + dy;
-        if (x >= 0 && x < W / 2 && y >= 0 && y < H / 2) blob.add(y * W + x);
+        if (x >= S.ax0 && x < W / 2 && y >= S.ay0 && y < H / 2) blob.add(y * W + x);
       }
       const all = new Set();
       for (const c of blob) {
@@ -318,8 +326,8 @@ function updateBall(b) {
   if (b.stun > 0) sp *= .2;
   let nx = b.x + b.dx * sp * DT, ny = b.y + b.dy * sp * DT, hit = false;
   const R = P.ballR;
-  if (nx < R) { nx = R; b.dx = Math.abs(b.dx); hit = true; } else if (nx > W - R) { nx = W - R; b.dx = -Math.abs(b.dx); hit = true; }
-  if (ny < R) { ny = R; b.dy = Math.abs(b.dy); hit = true; } else if (ny > H - R) { ny = H - R; b.dy = -Math.abs(b.dy); hit = true; }
+  if (nx < S.ax0 + R) { nx = S.ax0 + R; b.dx = Math.abs(b.dx); hit = true; } else if (nx > S.ax1 - R) { nx = S.ax1 - R; b.dx = -Math.abs(b.dx); hit = true; }
+  if (ny < S.ay0 + R) { ny = S.ay0 + R; b.dy = Math.abs(b.dy); hit = true; } else if (ny > S.ay1 - R) { ny = S.ay1 - R; b.dy = -Math.abs(b.dy); hit = true; }
   b.x = nx; b.y = ny;
   if (hit) { turn(b, rnd(-.16, .16)); ev("wall"); }
 }
@@ -603,7 +611,7 @@ function hit(t, dmg, by, quiet, x, y) {
 function revive(b) {
   const opts = [];
   for (let k = 0; k < N; k++) if (S.owner[k] === b.e && !hardAt(k)) opts.push(k);
-  const k = opts.length ? pick(opts) : irnd(2, H - 3) * W + irnd(2, W - 3);
+  const k = opts.length ? pick(opts) : irnd(S.ay0 + 2, S.ay1 - 3) * W + irnd(S.ax0 + 2, S.ax1 - 3);
   b.x = clampX(k % W + .5); b.y = clampY((k / W | 0) + .5); b.px = b.x; b.py = b.y;
   b.hp = 100; b.alive = true; b.invuln = 1;
   const a = rnd(Math.PI * 2); b.dx = Math.cos(a); b.dy = Math.sin(a); turn(b, 0);
@@ -618,7 +626,7 @@ function likes(e) {
 }
 function aim(b) {
   const w = likes(b.e);
-  for (let k = 0; k < N; k++) if (S.owner[k] === -1) w[k] += 1;
+  for (let k = 0; k < N; k++) if (S.owner[k] === -1 && S.inA[k]) w[k] += 1;
   let best = -1e9, ba = 0;
   const base = rnd(Math.PI * 2);
   for (let i = 0; i < 16; i++) {
@@ -653,13 +661,14 @@ function press(b) {
   if (b.ctl) ev("tap", { e: b.e });
   power(b);
 }
-function rayCells(x0, y0, x1, y1) {
+function rayCells(x0, y0, x1, y1, arena) {
   let dx = x1 - x0, dy = y1 - y0, n = Math.hypot(dx, dy);
   if (n < 1e-6) { dx = 1; dy = 0; n = 1; }
   dx /= n; dy /= n;
   const out = [], seen = new Set();
   let x = x0, y = y0, last = null;
-  while (x >= 0 && x < W && y >= 0 && y < H) {
+  const A = arena || (S && S.ax1 ? S : { ax0: 0, ay0: 0, ax1: W, ay1: H });
+  while (x >= A.ax0 && x < A.ax1 && y >= A.ay0 && y < A.ay1) {
     const c = [x | 0, y | 0];
     if (!last || c[0] !== last[0] || c[1] !== last[1]) {
       if (last && c[0] !== last[0] && c[1] !== last[1]) { const q = last[1] * W + c[0]; if (!seen.has(q)) { seen.add(q); out.push(q); } }
@@ -897,8 +906,8 @@ function cloneStep() {
   S.clones = S.clones.filter(c => S.t < c.until && S.by[c.e] && S.by[c.e].alive);
   for (const c of S.clones) {
     c.x += c.dx * P.cloneSpeed * DT; c.y += c.dy * P.cloneSpeed * DT;
-    if (c.x < .6 || c.x > W - .6) { c.dx = -c.dx; c.x = Math.min(W - .6, Math.max(.6, c.x)); }
-    if (c.y < .6 || c.y > H - .6) { c.dy = -c.dy; c.y = Math.min(H - .6, Math.max(.6, c.y)); }
+    if (c.x < S.ax0 + .6 || c.x > S.ax1 - .6) { c.dx = -c.dx; c.x = Math.min(S.ax1 - .6, Math.max(S.ax0 + .6, c.x)); }
+    if (c.y < S.ay0 + .6 || c.y > S.ay1 - .6) { c.dy = -c.dy; c.y = Math.min(S.ay1 - .6, Math.max(S.ay0 + .6, c.y)); }
     if (!paintNow) continue;
     const d = disc(c.x, c.y, P.cloneR);
     let n = 0;
@@ -947,8 +956,8 @@ function bubbleStep() {
     const b = S.by[q.e];
     if (!b) return false;
     q.x += q.dx * P.bubbleSpeed * DT; q.y += q.dy * P.bubbleSpeed * DT;
-    if (q.x < .5 || q.x > W - .5) q.dx = -q.dx;
-    if (q.y < .5 || q.y > H - .5) q.dy = -q.dy;
+    if (q.x < S.ax0 + .5 || q.x > S.ax1 - .5) q.dx = -q.dx;
+    if (q.y < S.ay0 + .5 || q.y > S.ay1 - .5) q.dy = -q.dy;
     const t = S.balls.find(o => o !== b && o.alive && o.invuln <= 0 && Math.hypot(o.x - q.x, o.y - q.y) < 1.2);
     if (!t && S.t < q.until) return true;
     capture(mask(k => disc(q.x, q.y, t ? 2.2 : 1.9)[k] && !hardAt(k)), q.e);
@@ -974,7 +983,7 @@ function snapshot(meta) {
     (b.stun > 0 ? 1 : 0) | (b.bigT > 0 ? 2 : 0) | (b.invuln > 0 ? 4 : 0) | (b.surge > 0 ? 8 : 0) | (b.phaseT > 0 ? 16 : 0) |
     (b.rushT > 0 ? 32 : 0) | (b.slowT > 0 ? 64 : 0) | (b.hasteT > 0 ? 128 : 0), r2(Math.max(0, b.hole)),
     r2(b.hx), r2(b.hy), r2(b.sx), r2(b.sy), r2(b.dx), r2(b.dy), b.powers, b.kills, b.name || "", b.pid || ""]);
-  return Object.assign({ t: r2(S.t), rx: S.reactions, pu: r2(S.promptUntil), fin: S.final ? 1 : 0, rd: S.round, fa: S.finalAt, o, g: gs, f: anyFade ? f : "", b: bs,
+  return Object.assign({ t: r2(S.t), rx: S.reactions, pu: r2(S.promptUntil), fin: S.final ? 1 : 0, rd: S.round, fa: S.finalAt, ar: [S.ax0, S.ay0, S.ax1, S.ay1], o, g: gs, f: anyFade ? f : "", b: bs,
     c: S.clones.map(c => [r2(c.x), r2(c.y), c.e]), k: S.bombs.map(q => [r2(q.x), r2(q.y), r2(q.t - S.t)]),
     u: S.bubbles.map(q => [r2(q.x), r2(q.y), q.e]) }, meta);
 }
@@ -998,31 +1007,53 @@ class Game {
   drain() { const e = this.S.events; this.S.events = []; return e; }
   snapshot(meta) { S = this.S; return snapshot(meta); }
 }
-// ---- дуэль: у каждой стороны 3 шара по очереди. Проиграл раунд - выходит следующий шар, победитель остаётся.
-// Кончились шары - проиграл дуэль. Ничья в раунде забирает по шару у обоих.
+// ---- дуэль 1 на 1 на маленькой арене ---------------------------------------
+// Драфт по очереди (первый берёт 1, второй 2, первый 2, второй 1), потом раунды по 30 с.
+// Перед раундом шар выбирает тот, у кого его нет: в начале оба вслепую, потом проигравший, видя шар победителя.
+// Победитель раунда остаётся, ничья выбивает оба шара. Кончились шары - дуэль проиграна.
 const DUEL_ROUND = 30, DUEL_SIZE = 3;
+const DUEL_OPTS = { round: DUEL_ROUND, arena: [3, 4, 17, 20] };
+class Draft {
+  constructor(first) { this.order = first ? [1, 0, 0, 1, 1, 0] : [0, 1, 1, 0, 0, 1]; this.i = 0; this.teams = [[], []]; }
+  turn() { return this.i < this.order.length ? this.order[this.i] : -1; }
+  get done() { return this.i >= this.order.length; }
+  free(e) { return e >= 0 && e < NEL && !this.teams[0].includes(e) && !this.teams[1].includes(e); }
+  pick(side, e) { if (side !== this.turn() || !this.free(e)) return false; this.teams[side].push(e); this.i++; return true; }
+  meta() { return { teams: this.teams.map(t => t.slice()), turn: this.turn(), i: this.i, order: this.order }; }
+}
 class Duel {
   constructor(teams, ctls) {
     this.teams = teams.map(t => t.slice(0, DUEL_SIZE)); this.ctls = ctls.slice();
-    this.idx = [0, 0]; this.round = 0; this.log = []; this.done = false; this.winner = -1; this.game = null;
+    this.lost = [[], []]; this.cur = [-1, -1]; this.round = 0; this.log = []; this.done = false; this.winner = -1; this.game = null;
   }
-  cur(side) { return this.teams[side][Math.min(DUEL_SIZE - 1, this.idx[side])]; }
+  left(side) { return this.teams[side].filter(e => !this.lost[side].includes(e)); }
+  need() { return this.done ? [] : [0, 1].filter(i => this.cur[i] < 0); }
+  choose(side, e) { if (this.done || this.cur[side] >= 0 || !this.left(side).includes(e)) return false; this.cur[side] = e; return true; }
   newRound() {
     this.round++;
-    this.game = new Game([0, 1].map(i => ({ e: this.cur(i), ctl: this.ctls[i] })), { round: DUEL_ROUND, pace: DUEL_PACE });
+    this.game = new Game([0, 1].map(i => ({ e: this.cur[i], ctl: this.ctls[i] })), Object.assign({ pace: DUEL_PACE }, DUEL_OPTS));
     return this.game;
   }
   endRound() {
-    const S = this.game.S, a = this.cur(0), b = this.cur(1), ca = S.counts[a], cb = S.counts[b];
+    const S = this.game.S, [a, b] = this.cur, ca = S.counts[a], cb = S.counts[b];
     const win = ca > cb ? 0 : cb > ca ? 1 : -1;
-    this.log.push([a, b, win, r2(ca / N * 100), r2(cb / N * 100)]);
-    if (win !== 0) this.idx[0]++;
-    if (win !== 1) this.idx[1]++;
-    const outA = this.idx[0] >= DUEL_SIZE, outB = this.idx[1] >= DUEL_SIZE;
+    this.log.push([a, b, win, r2(ca / S.area * 100), r2(cb / S.area * 100)]);
+    for (const i of [0, 1]) if (win !== i) { this.lost[i].push(this.cur[i]); this.cur[i] = -1; }
+    const outA = !this.left(0).length, outB = !this.left(1).length;
     if (outA || outB) { this.done = true; this.winner = outA && outB ? -1 : outA ? 1 : 0; }
     return win;
   }
-  meta() { return { teams: this.teams, idx: this.idx.slice(), round: this.round, log: this.log, done: this.done, winner: this.winner }; }
+  meta() { return { teams: this.teams, lost: this.lost.map(l => l.slice()), cur: this.cur.slice(), round: this.round, log: this.log, done: this.done, winner: this.winner }; }
+}
+// бот в драфте берёт шары против уже взятых соперником, при выборе на раунд - против шара победителя; иногда ошибается
+function duelScore(e, rivals) { return rivals.reduce((s, o) => s + (DSTRONG[e].includes(o) ? 2 : 0) - (DWEAK[e].includes(o) ? 2 : 0), 0); }
+function botDraft(d, side) {
+  const free = [...Array(NEL).keys()].filter(e => d.free(e)), opp = d.teams[1 - side];
+  return free.map(e => [e, duelScore(e, opp) + Math.random() * 2.5]).sort((x, y) => y[1] - x[1])[0][0];
+}
+function botChoose(duel, side) {
+  const o = duel.cur[1 - side], rivals = o >= 0 ? [o] : [];
+  return duel.left(side).map(e => [e, duelScore(e, rivals) + Math.random() * 1.5]).sort((x, y) => y[1] - x[1])[0][0];
 }
 // случайные стихии ботов: без повторов и без пары похожих цветов
 const CLASH = [[BOLT, SMILEY], [FIRE, SIX7], [MUSHROOM, GAS], [GAS, BOMB], [SLIME, SOUND], [WATER, TIME], [POISON, TIME],
@@ -1036,5 +1067,5 @@ function recountState(st) { const keep = S; S = st; recount(); S = keep; }
 export {
   W, H, N, DT, ROUND, FINAL, NEL, FIRE, ICE, PLANT, BOLT, WATER, EARTH, WIND, POISON, METAL, SUN, SAND, LAVA, SLIME, VOID, CRYSTAL,
   MUSHROOM, SMILEY, SIX7, GAS, SOUND, YINYANG, TIME, GHOST, BOMB, BUBBLE, GLITCH, CANDY, TITLE, WORD, ABOUT, STRONG, WEAK, DSTRONG, DWEAK, LAYERS, TOP, P, rnd, irnd, pick, shuffle, r2, rayCells, cellOf,
-  newBall, Game, Duel, DUEL_ROUND, DUEL_SIZE, PACE, DUEL_PACE, pickFree, recountState, seedRandom,
+  newBall, Game, Duel, Draft, botDraft, botChoose, DUEL_ROUND, DUEL_SIZE, DUEL_OPTS, PACE, DUEL_PACE, pickFree, recountState, seedRandom,
 };

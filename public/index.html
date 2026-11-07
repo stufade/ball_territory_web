@@ -33,7 +33,7 @@ canvas { display: block; touch-action: none; }
 import {
   W, H, N, DT, ROUND, FINAL, NEL, FIRE, ICE, PLANT, BOLT, WATER, EARTH, WIND, POISON, METAL, SUN, SAND, LAVA, SLIME, VOID, CRYSTAL,
   MUSHROOM, SMILEY, SIX7, GAS, SOUND, YINYANG, TIME, GHOST, BOMB, BUBBLE, GLITCH, CANDY, TITLE, WORD, ABOUT, STRONG, WEAK, DSTRONG, DWEAK, LAYERS, TOP, P, r2, rayCells, cellOf,
-  newBall, Game, Duel, DUEL_SIZE, pickFree, recountState, seedRandom,
+  newBall, Game, Duel, Draft, botDraft, botChoose, DUEL_SIZE, pickFree, recountState, seedRandom,
 } from "./game.js";
 
 // у картинки свой случайный генератор: так повтор матча (рилс) не зависит от искр и частиц
@@ -386,6 +386,16 @@ function txt(s, x, y, size, col, opt = {}) {
 const big = (s, x, y, size, col, extra = {}) => txt(s, x, y, size, col, Object.assign({ a: "center", font: FONT, w: "normal", stroke: Math.max(3, size / 12) }, extra));
 const px = v => FX + v * CELL, py = v => FY + v * CELL;
 
+// камера: маленькая арена дуэли растягивается на всё поле экрана
+const VIEW = { s: 1, tx: 0, ty: 0 };
+function setView() {
+  VIEW.s = 1; VIEW.tx = 0; VIEW.ty = 0;
+  if (!S || !S.ax1 || (S.ax1 - S.ax0 === W && S.ay1 - S.ay0 === H)) return;
+  const aw = (S.ax1 - S.ax0) * CELL, ah = (S.ay1 - S.ay0) * CELL, s = Math.min(FW / aw, FH / ah);
+  VIEW.s = s; VIEW.tx = FX + (FW - aw * s) / 2 - px(S.ax0) * s; VIEW.ty = FY + (FH - ah * s) / 2 - py(S.ay0) * s;
+}
+const sx = v => VIEW.tx + v * VIEW.s, sy = v => VIEW.ty + v * VIEW.s;  // точка поля -> экран
+const cellX = x => ((x - VIEW.tx) / VIEW.s - FX) / CELL, cellY = y => ((y - VIEW.ty) / VIEW.s - FY) / CELL;  // экран -> клетки
 const fx = {
   now: 0, parts: [], rings: [], arcs: [], beams: [], calls: [], words: [], formulas: [], log: [], seen: {}, press: -9,
   shake: 0, zoom: 0, focus: [FW / 2, FH / 2], tint: "#fff", tintK: 0, slow: 0, finalAt: -9,
@@ -403,10 +413,10 @@ const fx = {
   arc(x0, y0, x1, y1, col, life = .28) { this.arcs.push({ x0: px(x0), y0: py(y0), x1: px(x1), y1: py(y1), t: this.now, life, col }); },
   beam(x0, y0, x1, y1, col, w, life) { this.beams.push({ x0: px(x0), y0: py(y0), x1: px(x1), y1: py(y1), t: this.now, life, col, w }); },
   callout(s, x, y, col, size, life = 1.15) {
-    const yy = py(y), busy = this.calls.map(c => c.y), slots = [];
+    const yy = sy(py(y)), busy = this.calls.map(c => c.y), slots = [];
     for (let q = FY + 170; q < FY + FH - 40; q += 100) if (!busy.includes(q)) slots.push(q);
     if (!slots.length) return;
-    this.calls.push({ s, x: px(x), y: slots.reduce((a, b) => Math.abs(b - yy) < Math.abs(a - yy) ? b : a), col, size, t: this.now, life });
+    this.calls.push({ s, x: sx(px(x)), y: slots.reduce((a, b) => Math.abs(b - yy) < Math.abs(a - yy) ? b : a), col, size, t: this.now, life });
   },
 };
 const myE = () => S && S.you ? S.you.e : -1;
@@ -535,7 +545,7 @@ function drawCell(k, t) {
 }
 function drawAim(a) {
   for (const b of S.balls) {
-    const mine = b === S.you, { ex, ey } = rayCells(b.x, b.y, b.x + b.dx, b.y + b.dy);
+    const mine = b === S.you, { ex, ey } = rayCells(b.x, b.y, b.x + b.dx, b.y + b.dy, S.ax1 ? S : null);
     g.strokeStyle = mine ? "#ebebff" : BRIGHT[b.e]; g.lineWidth = mine ? 7 : 3; g.setLineDash(mine ? [18, 16] : [10, 14]);
     g.lineDashOffset = -a * 60; g.globalAlpha = mine ? 1 : .55;
     g.beginPath(); g.moveTo(px(b.x), py(b.y)); g.lineTo(px(ex), py(ey)); g.stroke();
@@ -586,12 +596,15 @@ function drawField(t, q, aiming) {
   g.save();
   g.beginPath(); g.rect(FX - 6, FY - 6, FW + 12, FH + 12); g.clip();
   g.translate(rnd(-fx.shake, fx.shake), rnd(-fx.shake, fx.shake));
+  const arena = VIEW.s !== 1;
+  if (arena) { g.fillStyle = "#0b0c22"; g.fillRect(FX - 6, FY - 6, FW + 12, FH + 12); g.translate(VIEW.tx, VIEW.ty); g.scale(VIEW.s, VIEW.s); }
   if (fx.zoom > .004) {
     const z = 1 + fx.zoom, cx = FX + fx.focus[0], cy = FY + fx.focus[1];
     g.translate(cx, cy); g.scale(z, z); g.translate(-cx, -cy);
   }
-  g.fillStyle = "#f0f0fc"; g.fillRect(FX - 6, FY - 6, FW + 12, FH + 12);
-  for (let k = 0; k < N; k++) drawCell(k, t);
+  if (arena) { g.fillStyle = "#f0f0fc"; g.fillRect(px(S.ax0) - 5, py(S.ay0) - 5, (S.ax1 - S.ax0) * CELL + 10, (S.ay1 - S.ay0) * CELL + 10); }
+  else { g.fillStyle = "#f0f0fc"; g.fillRect(FX - 6, FY - 6, FW + 12, FH + 12); }
+  for (let k = 0; k < N; k++) if (!arena || S.inA[k]) drawCell(k, t);
   const gp = S.by[PLANT];
   if (gp && gp.surge > 0 && gp.alive) ringAt(px(gp.sx), py(gp.sy), P.surgeArea * CELL, "#28964f", 4);
   for (const b of S.balls) if (b.hole > 0) drawHole(b, t);
@@ -642,7 +655,7 @@ function drawHud(t) {
   g.fillStyle = "#f0f0fc"; g.fillRect(17, 97, 686, 40);
   g.fillStyle = "#2e325c"; g.fillRect(20, 100, 680, 34);
   let x = 20;
-  const shown = S.counts.map(v => v / N * 100), lead = S.players.reduce((a, e) => S.counts[e] > S.counts[a] ? e : a, S.players[0]);
+  const shown = S.counts.map(v => v / (S.area || N) * 100), lead = S.players.reduce((a, e) => S.counts[e] > S.counts[a] ? e : a, S.players[0]);
   for (const e of S.players) { const w = shown[e] / 100 * 680; g.fillStyle = BRIGHT[e]; g.fillRect(x, 100, w, 34); x += w; }
   S.players.forEach((e, i) => {
     const cx = 20 + i * 173, b = S.by[e], top = e === lead;
@@ -698,7 +711,7 @@ function promptOn() { return S && S.t < S.promptUntil && myPrompts() && S.you &&
 function drawCalls(t) {
   for (const w of fx.words) {
     const u = (fx.now - w.t) / .95, b = w.b;
-    txt(w.s, Math.min(VW - 130, Math.max(130, px(b.x))), Math.max(FY + 40, py(b.y) - 92 - 28 * u), 44, w.e === VOID ? NAMECOL[VOID] : LIGHT[w.e],
+    txt(w.s, Math.min(VW - 130, Math.max(130, sx(px(b.x)))), Math.max(FY + 40, sy(py(b.y)) - 92 - 28 * u), 44, w.e === VOID ? NAMECOL[VOID] : LIGHT[w.e],
       { a: "center", stroke: 6, font: FONT, w: "normal", alpha: Math.min(1, (1 - u) * 3), max: 600 });
   }
   for (const c of fx.calls) {
@@ -755,7 +768,7 @@ function drawGrid(top, gap, r, sel, taken, t, hops) {
   }
 }
 // в выборе команды для дуэли своя таблица «кто кого» - один на один контры другие
-const matchups = () => phase === "dpick" || (phase === "lobby" && net.gm === "duel") ? [DSTRONG, DWEAK] : [STRONG, WEAK];
+const matchups = () => phase === "ddraft" || phase === "dchoose" || (phase === "lobby" && net.gm === "duel") ? [DSTRONG, DWEAK] : [STRONG, WEAK];
 function gridHit(x, y, top, gap, r) {
   for (let e = 0; e < NEL; e++) { const [gx, gy] = gridPos(e, top, gap); if (Math.hypot(x - gx, y - gy) < r + 18) return e; }
   return -1;
@@ -783,7 +796,7 @@ const BTN = {
   solo: [120, 820, 232, 104], duel: [368, 820, 232, 104], create: [120, 944, 480, 96], join: [120, 1058, 480, 96], gear: [610, 20, 90, 90],
   play: [120, 1086, 480, 100], again: [120, 1074, 480, 96], change: [120, 1184, 480, 76], tut: [120, 1172, 480, 80],
   joinGo: [120, 720, 480, 100], back: [120, 1130, 480, 90], start: [120, 1064, 480, 92], leave: [220, 1172, 280, 64],
-  ok: [120, 760, 230, 96], wait: [370, 760, 230, 96], invite: [100, 126, 250, 58], mode: [370, 126, 250, 58], reconnect: [120, 1062, 480, 96],
+  ok: [120, 760, 230, 96], wait: [370, 760, 230, 96], invite: [100, 126, 250, 58], mode: [370, 126, 250, 58], dpick: [120, 1052, 480, 96], dback: [220, 1176, 280, 64], reconnect: [120, 1062, 480, 96],
   rename: [20, 16, 150, 50], nameOk: [120, 720, 480, 100], nameSpot: [160, 530, 400, 60],
   togPrompts: [560, 330, 110, 56], togAuto: [560, 560, 110, 56],
 };
@@ -877,11 +890,11 @@ function drawLobby(t) {
     g.fillStyle = s ? (s.id === net.me ? "#3a3a70" : PANEL) : "#181a38"; g.fillRect(x, y, 330, 112);
     if (s && s.id === net.me) { g.strokeStyle = "#fff"; g.lineWidth = 3; g.strokeRect(x + 1.5, y + 1.5, 327, 109); }
     if (i === 0) { g.fillStyle = "#ffd63c"; g.fillRect(x, y, 330, 4); }
-    txt(s ? seatName(s, i) : "BOT", x + 165, y + 26, 20, s ? "#fff" : "#5a5f94", { a: "center", font: FONT, w: "normal", max: 300 });
-    for (let j = 0; j < DUEL_SIZE; j++) {
-      const e = s && s.team ? s.team[j] : undefined, cx = x + 75 + j * 90;
-      if (e !== undefined) ballArt(e, cx, y + 72, 26);
-      else { ringAt(cx, y + 72, 26, "#5a5f94", 4); txt(s ? String(j + 1) : "?", cx, y + 74, 24, "#8c90b8", { a: "center", font: FONT, w: "normal" }); }
+    if (s) { txt(seatName(s, i), x + 165, y + 42, 28, "#fff", { a: "center", font: FONT, w: "normal", max: 300 }); txt(i === 0 ? "host" : "ready", x + 165, y + 82, 20, "#8c90b8", { a: "center" }); }
+    else {
+      txt("WAITING FOR", x + 165, y + 40, 22, "#ffd63c", { a: "center", font: FONT, w: "normal", alpha: .6 + .4 * Math.sin(t * 4) });
+      txt(`OPPONENT${".".repeat(1 + (t * 3 | 0) % 3)}`, x + 165, y + 72, 22, "#ffd63c", { a: "center", font: FONT, w: "normal", alpha: .6 + .4 * Math.sin(t * 4) });
+      txt(host ? "or start vs a bot" : "", x + 165, y + 100, 16, "#8c90b8", { a: "center" });
     }
   }
   else for (let i = 0; i < 4; i++) {
@@ -896,9 +909,9 @@ function drawLobby(t) {
   }
   const mine = seats.findIndex(s => s.id === net.me);
   if (online && net.me && mine < 0) txt("The room is full: you will watch the match.", VW / 2, 360, 22, "#ffd63c", { a: "center" });
-  const taken = duelMode ? seats.filter(s => s.id !== net.me).flatMap(s => s.team || []) : seats.filter(s => s.id !== net.me && s.e >= 0).map(s => s.e);
+  const taken = duelMode ? [] : seats.filter(s => s.id !== net.me && s.e >= 0).map(s => s.e);
   drawGrid(392, 96, 31, chosen, taken, t, null);
-  if (duelMode && mine >= 0) team.forEach((e, i) => { const [x, y] = gridPos(e, 392, 96); ringAt(x, y, 39, "#ffd63c", 5); circle(x + 27, y - 27, 13, "#ffd63c"); txt(String(i + 1), x + 27, y - 26, 16, "#1a1200", { a: "center", font: FONT, w: "normal" }); });
+  if (duelMode) txt("Balls are drafted in turns after START. Tap one to read about it.", VW / 2, 360, 20, "#c8cdf5", { a: "center", max: 680 });
   drawInfo(chosen, 932, 120);
   if (!online && net.err) btn(BTN.reconnect, "RECONNECT", "#ffd63c", "#0e0a22", 40);
   else if (host) btn(BTN.start, "START", "#2ed068", "#0e0a22", 46);
@@ -916,33 +929,67 @@ function drawLobby(t) {
   }
   if (net.toast && fx.now - net.toastAt < 2.5) { g.fillStyle = "rgba(10,10,30,.9)"; g.fillRect(110, 1000, 500, 54); txt(net.toast, VW / 2, 1027, 24, "#fff", { a: "center", max: 480 }); }
 }
-// ---- дуэль: 1 на 1, у каждого 3 шара по очереди --------------------------
-// duel - дуэль, которую считает этот браузер (против бота); D - её состояние для картинки (своё или с сервера)
-let duel = null, D = null, team = [], rendAt = 0;
-const DUEL_TOP = 330, DUEL_GAP = 100, DUEL_R = 33;
-function duelMeta() { return Object.assign(duel.meta(), { names: ["YOU", "BOT"], side: 0 }); }
-function sideName(i) { return D && i === D.side ? "YOU" : D && D.names && D.names[i] ? String(D.names[i]).toUpperCase() : "BOT"; }
-function openDuelPick() { phase = "dpick"; pickAt = fx.now; chosen = -1; team = []; snd.voice(); }
-function startDuelSolo(mine) {
-  tut = null;
-  const used = mine.slice(), bot = [];
-  while (used.length < DUEL_SIZE) { const e = pickFree(used); used.push(e); mine.push(e); }
-  for (let i = 0; i < DUEL_SIZE; i++) { const e = pickFree(used); used.push(e); bot.push(e); }
-  team = mine.slice();
-  duel = new Duel([mine, bot], ["me", null]);
-  track("duel_start");
-  duelRound();
+// ---- дуэль: драфт по очереди, выбор шара перед раундом, раунды на маленькой арене ----
+// duel/draft считает этот браузер (против бота); D - дуэль для картинки боя, DR - драфт и выбор шара для экранов (свои или с сервера)
+let duel = null, draft = null, D = null, DR = null, rendAt = 0, turnAt = 0, chooseAt = 0, readyAt = 0, blindSolo = false;
+const DUEL_TOP = 330, DUEL_GAP = 100, DUEL_R = 33, DRAFT_TURN = 15, CHOOSE_TIME = 10, SOLO_NAMES = ["YOU", "BOT"];
+const mySide = () => net.mode === "solo" ? 0 : DR && DR.pids ? DR.pids.indexOf(net.me) : D && D.pids ? D.pids.indexOf(net.me) : -1;
+function sideName(i) {
+  if (i === mySide()) return "YOU";
+  const nm = (DR && DR.names) || (D && D.names);
+  return nm && nm[i] ? String(nm[i]).toUpperCase() : "BOT";
+}
+const randomOf = a => a[Math.floor(Math.random() * a.length)];
+function syncSolo() {
+  if (duel) D = Object.assign(duel.meta(), { names: SOLO_NAMES, side: 0 });
+  DR = { ph: phase === "dchoose" ? "choose" : "draft", draft: draft.meta(), dm: duel ? duel.meta() : null, blind: blindSolo, names: SOLO_NAMES, pids: null,
+    until: phase === "dchoose" ? chooseAt + CHOOSE_TIME : turnAt + DRAFT_TURN };
+}
+function openDuel() {
+  tut = null; duel = null; D = null; game = null; S = null; chosen = -1;
+  draft = new Draft(Math.random() < .5 ? 0 : 1);
+  phase = "ddraft"; pickAt = turnAt = fx.now; syncSolo();
+  snd.voice(); track("duel_start");
+}
+function draftPick(e) {  // мой ход в драфте
+  if (!DR || DR.draft.turn !== mySide() || e < 0) return;
+  if (net.mode === "solo") { if (draft.pick(0, e)) { turnAt = fx.now; chosen = -1; snd.power(e); syncSolo(); } }
+  else { send({ t: "dpick", e }); chosen = -1; snd.power(e); }
+}
+function chooseBall(e) {  // мой шар на раунд
+  if (net.mode === "solo") { if (duel.choose(0, e)) { readyAt = fx.now + .6; snd.power(e); syncSolo(); } }
+  else { send({ t: "dchoose", e }); snd.power(e); }
+}
+function enterChooseSolo() {
+  const need = duel.need();
+  blindSolo = need.length === 2;
+  if (need.includes(1)) duel.choose(1, botChoose(duel, 1));
+  phase = "dchoose"; chooseAt = fx.now; readyAt = need.includes(0) ? Infinity : fx.now + 1.4;
+  syncSolo();
+}
+function soloDuelUpdate() {
+  if (phase === "ddraft" && draft) {
+    const turn = draft.turn();
+    if (draft.done) { if (fx.now > turnAt + 1.3) { duel = new Duel(draft.teams, ["me", null]); enterChooseSolo(); } }
+    else if (turn === 1 && fx.now > turnAt + .9) { const e = botDraft(draft, 1); draft.pick(1, e); turnAt = fx.now; snd.power(e); syncSolo(); }
+    else if (turn === 0 && fx.now > turnAt + DRAFT_TURN) draftPick(randomOf([...Array(NEL).keys()].filter(e => draft.free(e))));
+  }
+  if (phase === "dchoose" && duel) {
+    if (duel.cur[0] < 0 && fx.now > chooseAt + CHOOSE_TIME) chooseBall(randomOf(duel.left(0)));
+    if (!duel.need().length && fx.now > readyAt) duelRound();
+  }
+  if (duel && phase === "rend" && fx.now - rendAt > 3.5) { if (duel.done) startWin(); else enterChooseSolo(); }
 }
 function duelRound() {
-  game = duel.newRound(); S = game.S; S.you = S.by[duel.cur(0)]; S.you.auto = settings.auto;
-  D = duelMeta();
+  game = duel.newRound(); S = game.S; S.you = S.by[duel.cur[0]]; S.you.auto = settings.auto;
+  D = Object.assign(duel.meta(), { names: SOLO_NAMES, side: 0 });
   game.drain(); fx.reset(); phase = "aim"; aimStart = fx.now; dragging = false; acc = 0;
 }
 function duelRoundEnd() {
-  const a = duel.cur(0), b = duel.cur(1), seats = [a, b].map(e => ({ e, human: e === a, kills: S.by[e].kills, powers: S.by[e].powers,
-    pct: Math.round(S.counts[e] / N * 1000) / 10, place: S.counts[e] >= S.counts[e === a ? b : a] ? 1 : 2 }));
+  const [a, b] = duel.cur, seats = [a, b].map(e => ({ e, human: e === a, kills: S.by[e].kills, powers: S.by[e].powers,
+    pct: Math.round(S.counts[e] / S.area * 1000) / 10, place: S.counts[e] >= S.counts[e === a ? b : a] ? 1 : 2 }));
   track("duel_round", { reactions: S.reactions, seats });
-  duel.endRound(); D = duelMeta();
+  duel.endRound(); D = Object.assign(duel.meta(), { names: SOLO_NAMES, side: 0 });
   roundOver();
 }
 function roundOver() {
@@ -952,37 +999,35 @@ function roundOver() {
   else if (w === -1) snd.chime([523, 523], .15);
   else { snd.ko(); haptic("medium"); }
 }
-// три шара стороны: выбывшие перечёркнуты, текущий в рамке
-function teamRow(i, x, y, r, gap, alpha = 1) {
-  const tm = D.teams[i], idx = D.idx[i];
+// шары стороны: выбывшие перечёркнуты, тот, что в бою, в рамке
+function teamRow(i, x, y, r, gap, src = D, hideCur = false) {
+  const tm = src.teams[i] || [];
   tm.forEach((e, j) => {
-    const cx = x + j * gap, out = j < idx, now = j === Math.min(idx, tm.length - 1) && !D.done;
-    g.globalAlpha = alpha * (out ? .35 : now ? 1 : .75);
+    const cx = x + j * gap, out = src.lost && src.lost[i].includes(e), now = !hideCur && src.cur && src.cur[i] === e && !src.done;
+    g.globalAlpha = out ? .35 : now ? 1 : .8;
     ballArt(e, cx, y, r);
-    g.globalAlpha = alpha;
+    g.globalAlpha = 1;
     if (now) ringAt(cx, y, r * 1.3, "#fff", Math.max(3, r * .14));
     if (out) { line(cx - r * .8, y - r * .8, cx + r * .8, y + r * .8, "#ff3c46", Math.max(4, r * .22)); line(cx + r * .8, y - r * .8, cx - r * .8, y + r * .8, "#ff3c46", Math.max(4, r * .22)); }
-    g.globalAlpha = 1;
   });
 }
 function drawDuelStrip() {
   g.fillStyle = PANEL; g.fillRect(20, 1104, 680, 38);
-  txt(sideName(0), 30, 1124, 20, D.side === 0 ? "#ffe65a" : "#fff", { font: FONT, w: "normal", max: 120 });
+  txt(sideName(0), 30, 1124, 20, mySide() === 0 ? "#ffe65a" : "#fff", { font: FONT, w: "normal", max: 120 });
   teamRow(0, 170, 1123, 14, 34);
   big(`ROUND ${D.round}`, VW / 2, 1124, 24, "#fff", { stroke: 3 });
   teamRow(1, 482, 1123, 14, 34);
-  txt(sideName(1), 690, 1124, 20, D.side === 1 ? "#ffe65a" : "#fff", { a: "right", font: FONT, w: "normal", max: 120 });
+  txt(sideName(1), 690, 1124, 20, mySide() === 1 ? "#ffe65a" : "#fff", { a: "right", font: FONT, w: "normal", max: 120 });
 }
 // итог раунда поверх поля
 function drawRoundEnd(t) {
   const k = t - rendAt, last = D.log[D.log.length - 1];
   if (!last) return;
-  const [a, b, w, pa, pb] = last, al = clamp01(k / .25);
+  const [a, b, w, pa, pb] = last, al = clamp01(k / .25), mine = mySide();
   g.globalAlpha = .82 * al; g.fillStyle = "#0b0c22"; g.fillRect(0, 0, VW, VH); g.globalAlpha = 1;
   big(`ROUND ${D.round}`, VW / 2, 300, 34, "#c8cdf5", { stroke: 3, alpha: al });
-  const mine = D.side, title = w === -1 ? "DRAW!" : mine < 0 ? `${TITLE[w ? b : a]} WINS` : w === mine ? "ROUND WON!" : "ROUND LOST";
-  const q = backOut(clamp01(k / .3));
-  big(title, VW / 2, 380, 78 * q, w === -1 ? "#fff" : mine < 0 || w === mine ? "#ffe65a" : "#ff7878", { stroke: 7 });
+  const title = w === -1 ? "DRAW!" : mine < 0 ? `${TITLE[w ? b : a]} WINS` : w === mine ? "ROUND WON!" : "ROUND LOST";
+  big(title, VW / 2, 380, 78 * backOut(clamp01(k / .3)), w === -1 ? "#fff" : mine < 0 || w === mine ? "#ffe65a" : "#ff7878", { stroke: 7 });
   [[a, pa, 0, 190], [b, pb, 1, 530]].forEach(([e, p, side, x]) => {
     const lost = w !== side, drop = lost ? ease(clamp01((k - .5) / .5)) : 0, y = 560 + drop * 30;
     g.globalAlpha = 1 - drop * .55; ballArt(e, x, y, 70); g.globalAlpha = 1;
@@ -993,36 +1038,101 @@ function drawRoundEnd(t) {
   });
   big("VS", VW / 2, 570, 48, "#8c90b8", { stroke: 4 });
   teamRow(0, 130, 820, 30, 80); teamRow(1, 430, 820, 30, 80);
-  if (D.done) big(D.winner === -1 ? "DUEL DRAW" : "DUEL OVER", VW / 2, 950, 44, "#fff", { stroke: 4, alpha: clamp01((k - 1) / .3) });
-  else {
-    const nxt = [0, 1].filter(i => w !== i).map(i => `${i === mine ? "YOUR" : sideName(i) + "'S"} NEXT: ${TITLE[D.teams[i][D.idx[i]]]}`);
-    nxt.forEach((s, i) => big(s, VW / 2, 940 + i * 50, 32, "#fff", { stroke: 4, alpha: clamp01((k - 1) / .3), max: 660 }));
-  }
+  const al2 = clamp01((k - 1) / .3);
+  if (D.done) big(D.winner === -1 ? "DUEL DRAW" : "DUEL OVER", VW / 2, 950, 44, "#fff", { stroke: 4, alpha: al2 });
+  else [0, 1].filter(i => w !== i).forEach((i, n) => big(i === mine ? "YOU CHOOSE YOUR NEXT BALL" : `${sideName(i)} CHOOSES NEXT`, VW / 2, 940 + n * 50, 32, "#fff", { stroke: 4, alpha: al2, max: 660 }));
 }
-function drawDuelPick(t) {
+// команды сверху экранов драфта и выбора
+function drawSides(y, src, hideOpp) {
+  const me = mySide();
+  [0, 1].forEach(i => {
+    const x0 = i === 0 ? 20 : 370, active = DR.ph === "draft" && DR.draft.turn === i;
+    g.fillStyle = active ? "#3a3a70" : PANEL; g.fillRect(x0, y, 330, 118);
+    if (active) { g.strokeStyle = "#ffd63c"; g.lineWidth = 4; g.strokeRect(x0 + 2, y + 2, 326, 114); }
+    txt(sideName(i), x0 + 165, y + 24, 22, i === me ? "#ffe65a" : "#fff", { a: "center", font: FONT, w: "normal", max: 300 });
+    for (let j = 0; j < DUEL_SIZE; j++) {
+      const cx = x0 + 75 + j * 90, cy = y + 76, e = src.teams[i] ? src.teams[i][j] : undefined;
+      if (e === undefined) { ringAt(cx, cy, 28, "#464a78", 4); txt(String(j + 1), cx, cy + 2, 24, "#5a5f94", { a: "center", font: FONT, w: "normal" }); continue; }
+      const out = src.lost && src.lost[i].includes(e), now = src.cur && src.cur[i] === e && !(hideOpp && i !== me);
+      g.globalAlpha = out ? .35 : 1; ballArt(e, cx, cy, 28); g.globalAlpha = 1;
+      if (now) ringAt(cx, cy, 37, "#fff", 4);
+      if (out) { line(cx - 22, cy - 22, cx + 22, cy + 22, "#ff3c46", 6); line(cx + 22, cy - 22, cx - 22, cy + 22, "#ff3c46", 6); }
+    }
+  });
+}
+function drawDraft(t) {
   backdrop();
-  big("PICK 3 BALLS", VW / 2, 66, 60, "#ffd63c");
-  txt("They fight one by one. Lose a round: your next ball comes in.", VW / 2, 120, 22, "#c8cdf5", { a: "center", max: 680 });
-  for (let i = 0; i < DUEL_SIZE; i++) {
-    const x = 240 + i * 120, y = 210, e = team[i];
-    if (e === undefined) { ringAt(x, y, 40, "#464a78", 5); txt(String(i + 1), x, y + 2, 34, "#5a5f94", { a: "center", font: FONT, w: "normal" }); }
-    else { ballArt(e, x, y, 40); circle(x + 32, y - 32, 15, "#ffd63c"); txt(String(i + 1), x + 32, y - 31, 18, "#1a1200", { a: "center", font: FONT, w: "normal" }); }
+  const dr = DR.draft, me = mySide(), turn = dr.turn, left = Math.max(0, DR.until - fx.now);
+  big("DUEL DRAFT", VW / 2, 54, 52, "#ffd63c");
+  txt("Take turns: 1 - 2 - 2 - 1. Three balls each.", VW / 2, 100, 22, "#c8cdf5", { a: "center" });
+  drawSides(120, { teams: dr.teams }, false);
+  if (turn < 0) big("DRAFT DONE! FIGHT!", VW / 2, 282, 44, "#ffe65a", { stroke: 5 });
+  else if (turn === me) big("YOUR PICK!", VW / 2, 278, 50 * (1 + .05 * Math.sin(t * 8)), "#ffe65a", { stroke: 5 });
+  else big(`${sideName(turn)} IS PICKING${".".repeat(1 + (t * 3 | 0) % 3)}`, VW / 2, 278, 38, "#fff", { stroke: 4, max: 660 });
+  if (turn >= 0 && (turn === me || net.mode === "online")) { g.fillStyle = "#2a2e5a"; g.fillRect(120, 304, 480, 8); g.fillStyle = "#ffd63c"; g.fillRect(120, 304, 480 * left / DRAFT_TURN, 8); }
+  const taken = [...dr.teams[0], ...dr.teams[1]];
+  drawGrid(DUEL_TOP + 14, DUEL_GAP, DUEL_R, chosen, taken, t - pickAt, null);
+  [0, 1].forEach(i => dr.teams[i].forEach((e, j) => {
+    const [x, y] = gridPos(e, DUEL_TOP + 14, DUEL_GAP), col = i === me ? "#ffd63c" : "#ff5a5a";
+    ringAt(x, y, DUEL_R + 7, col, 5); circle(x + DUEL_R * .85, y - DUEL_R * .85, 13, col); txt(String(j + 1), x + DUEL_R * .85, y - DUEL_R * .85 + 1, 16, "#1a1200", { a: "center", font: FONT, w: "normal" });
+  }));
+  drawInfo(chosen, 900, 140);
+  if (turn === me) {
+    const ok = chosen >= 0 && !taken.includes(chosen);
+    btn(BTN.dpick, ok ? `PICK ${TITLE[chosen]}` : "TAP A BALL", ok ? BRIGHT[chosen] : "#2a2e5a", ok ? ON_COL(chosen) : "#8c90b8", 40);
   }
-  drawGrid(DUEL_TOP, DUEL_GAP, DUEL_R, chosen, null, t - pickAt, null);
-  team.forEach((e, i) => { const [x, y] = gridPos(e, DUEL_TOP, DUEL_GAP); ringAt(x, y, DUEL_R + 8, "#ffd63c", 6); circle(x + DUEL_R * .85, y - DUEL_R * .85, 14, "#ffd63c"); txt(String(i + 1), x + DUEL_R * .85, y - DUEL_R * .85 + 1, 17, "#1a1200", { a: "center", font: FONT, w: "normal" }); });
-  drawInfo(chosen, 900, 160);
-  btn(BTN.play, team.length === DUEL_SIZE ? "FIGHT!" : team.length ? "FILL RANDOM & FIGHT" : "RANDOM TEAM", team.length === DUEL_SIZE ? "#ff542c" : "#3a3e70", "#fff");
-  btn(BTN.leave, "BACK", "#2a2e5a", "#c8cdf5", 26);
+  btn(BTN.dback, net.mode === "solo" ? "BACK" : "LEAVE", "#2a2e5a", "#c8cdf5", 26);
 }
-function duelPickTap(x, y) {
-  if (inside(BTN.leave, x, y)) { phase = "title"; return; }
-  if (inside(BTN.play, x, y)) { startDuelSolo(team.slice()); return; }
-  for (let i = 0; i < team.length; i++) if (Math.hypot(x - (240 + i * 120), y - 210) < 46) { team.splice(i, 1); return; }
-  const q = gridHit(x, y, DUEL_TOP, DUEL_GAP, DUEL_R);
-  if (q < 0) return;
-  chosen = q;
-  const at = team.indexOf(q);
-  if (at >= 0) team.splice(at, 1); else if (team.length < DUEL_SIZE) { team.push(q); snd.power(q); }
+// варианты на раунд: мои оставшиеся шары крупно в ряд
+function chooseSpots() {
+  const me = mySide(), dm = DR.dm, opts = dm.teams[me].filter(e => !dm.lost[me].includes(e));
+  return opts.map((e, i) => [e, VW / 2 + (i - (opts.length - 1) / 2) * 220, 720]);
+}
+function drawChoose(t) {
+  backdrop();
+  const dm = DR.dm, me = mySide(), opp = 1 - me, left = Math.max(0, DR.until - fx.now);
+  big(`ROUND ${dm.round + 1}`, VW / 2, 56, 54, "#ffd63c");
+  const needMe = me >= 0 && dm.cur[me] < 0, hide = DR.blind && needMe;
+  drawSides(100, dm, hide);
+  if (me < 0) { big("PLAYERS ARE CHOOSING…", VW / 2, 500, 40, "#fff", { stroke: 4 }); return; }
+  const oc = hide ? -1 : dm.cur[opp];
+  txt(sideName(opp), VW / 2, 268, 24, "#c8cdf5", { a: "center", font: FONT, w: "normal" });
+  if (oc >= 0) {
+    ballArt(oc, VW / 2, 360, 64);
+    txt(DR.blind ? "IS READY" : `${TITLE[oc]} STAYS IN THE FIGHT`, VW / 2, 450, 24, "#fff", { a: "center", font: FONT, w: "normal", max: 660 });
+  } else {
+    ringAt(VW / 2, 360, 64, "#5a5f94", 6); big("?", VW / 2, 362, 70, "#8c90b8", { stroke: 0 });
+    txt(dm.cur[opp] >= 0 ? "PICKED - HIDDEN UNTIL THE ROUND" : "IS CHOOSING…", VW / 2, 450, 22, "#c8cdf5", { a: "center" });
+  }
+  if (needMe) {
+    big("CHOOSE YOUR BALL", VW / 2, 560, 48, "#fff", { stroke: 5 });
+    for (const [e, x, y] of chooseSpots()) {
+      const tag = oc >= 0 && DSTRONG[e].includes(oc) ? GOOD : oc >= 0 && DWEAK[e].includes(oc) ? BAD : null;
+      if (tag) { g.globalAlpha = .25; circle(x, y, 96, tag); g.globalAlpha = 1; ringAt(x, y, 84, tag, 8); }
+      ballArt(e, x, y, 70 * (1 + .03 * Math.sin(t * 5 + x)));
+      txt(TITLE[e], x, y + 104, 24, "#fff", { a: "center", font: FONT, w: "normal", max: 210 });
+      if (tag) txt(tag === GOOD ? `STRONG VS ${TITLE[oc]}` : `WEAK VS ${TITLE[oc]}`, x, y + 136, 17, tag, { a: "center", font: FONT, w: "normal", max: 210 });
+    }
+    g.fillStyle = "#2a2e5a"; g.fillRect(120, 900, 480, 10); g.fillStyle = "#ffd63c"; g.fillRect(120, 900, 480 * left / CHOOSE_TIME, 10);
+    txt("Tap a ball. Time is up: a random one goes.", VW / 2, 940, 22, "#c8cdf5", { a: "center" });
+  } else {
+    const mineE = dm.cur[me];
+    big(oc >= 0 && !DR.blind ? "GET READY!" : `${sideName(opp)} IS CHOOSING${".".repeat(1 + (t * 3 | 0) % 3)}`, VW / 2, 580, 40, "#fff", { stroke: 4, max: 660 });
+    if (mineE >= 0) { ballArt(mineE, VW / 2, 740, 70); txt(D && D.log.length && !DR.blind ? `YOUR ${TITLE[mineE]} STAYS` : `YOU PICKED ${TITLE[mineE]}`, VW / 2, 840, 26, "#ffe65a", { a: "center", font: FONT, w: "normal", max: 660 }); }
+  }
+  if (net.mode === "online") btn(BTN.dback, "LEAVE", "#2a2e5a", "#c8cdf5", 26);
+}
+function duelTap(x, y) {
+  if (inside(BTN.dback, x, y)) { if (net.mode === "solo") { phase = "title"; draft = null; duel = null; DR = null; D = null; } else leaveRoom(); return; }
+  if (phase === "ddraft") {
+    if (inside(BTN.dpick, x, y)) { const taken = [...DR.draft.teams[0], ...DR.draft.teams[1]]; if (chosen >= 0 && !taken.includes(chosen)) draftPick(chosen); return; }
+    const q = gridHit(x, y, DUEL_TOP + 14, DUEL_GAP, DUEL_R);
+    if (q >= 0) { chosen = q; snd.tick(); }
+  } else if (phase === "dchoose") {
+    const me = mySide();
+    if (me < 0 || DR.dm.cur[me] >= 0) return;
+    for (const [e, cx, cy] of chooseSpots()) if (Math.hypot(x - cx, y - cy) < 90) { chooseBall(e); return; }
+  }
 }
 
 // ---- конец матча: победитель вылетает в центр, его стихия, корона, места ----
@@ -1034,13 +1144,13 @@ const clamp01 = u => Math.max(0, Math.min(1, u));
 const backOut = u => { const c = 1.7; return 1 + (c + 1) * (u - 1) ** 3 + c * (u - 1) ** 2; };
 function startWin() {
   const order = S.players.slice().sort((a, b) => S.counts[b] - S.counts[a]), b = S.by[order[0]];
-  Object.assign(win, { parts: [], e: order[0], order, pct: order.map(e => S.counts[e] / N * 100), once: {}, shake: 0, splats: [], cracks: null,
-    from: b && b.alive ? [px(b.x), py(b.y)] : [FX + FW / 2, FY + FH / 2] });
+  Object.assign(win, { parts: [], e: order[0], order, pct: order.map(e => S.counts[e] / (S.area || N) * 100), once: {}, shake: 0, splats: [], cracks: null,
+    from: b && b.alive ? [sx(px(b.x)), sy(py(b.y))] : [FX + FW / 2, FY + FH / 2] });
   phase = "end"; endAt = fx.now; haptic("heavy");
   if (tut) { tutDone = true; try { localStorage.setItem("bt-tut", "1"); } catch (e) { /* не страшно */ } track("tut", { v: "done" }); }
   if (net.mode === "solo" && S.you && !D) {
     track(tut ? "tut_end" : "solo_end", { reactions: S.reactions, seats: S.players.map(q => ({ e: q, human: S.by[q] === S.you, place: order.indexOf(q) + 1,
-      pct: Math.round(S.counts[q] / N * 1000) / 10, kills: S.by[q].kills, powers: S.by[q].powers })) });
+      pct: Math.round(S.counts[q] / (S.area || N) * 1000) / 10, kills: S.by[q].kills, powers: S.by[q].powers })) });
   }
 }
 function wp(x, y, vx, vy, o) {
@@ -1359,7 +1469,7 @@ function drawEnd(t) {
     btn(BTN.change, "MENU", PANEL, "#fff", 32);
   } else if (D && net.mode === "solo") {
     btn(BTN.again, "DUEL AGAIN", "#b04cff", "#fff");
-    btn(BTN.change, "CHANGE TEAM", PANEL, "#fff", 32);
+    btn(BTN.change, "MENU", PANEL, "#fff", 32);
   } else if (net.mode === "solo") {
     btn(BTN.again, "PLAY AGAIN", BRIGHT[you], ON_COL(you));
     btn(BTN.change, "CHANGE BALL", PANEL, "#fff", 32);
@@ -1394,7 +1504,7 @@ function startTutorial() {
   game = new Game([{ e: TUT_ME, ctl: "me" }, { e: TUT_BOT, ctl: null }]);
   S = game.S; S.you = S.by[TUT_ME]; S.you.auto = false; S.nextPrompt = 1e9;
   game.drain(); fx.reset(); phase = "aim"; aimStart = fx.now; dragging = false; acc = 0;
-  tut = { step: "goal", at: fx.now }; duel = null; D = null;
+  tut = { step: "goal", at: fx.now }; duel = null; D = null; DR = null; draft = null;
   track("tut", { v: "goal" });
   snd.voice();
 }
@@ -1418,6 +1528,7 @@ function tutUpdate() {
   const bot = S.by[TUT_BOT];
   if (bot && bot.charge > .9) bot.charge = .9;  // бот в обучении без силы
   if (tut.step === "rx" && tut.rx) { tutGo("rxOk"); return; }
+  if (tut.step === "bush" && !tutBush()) { tutGo(tut.rx ? "rxOk" : "final"); return; }  // трава уже сгорела
   if (st.time && fx.now - tut.at > st.time) tutGo(st.next);
 }
 // касание во время обучения; true - касание съедено
@@ -1517,7 +1628,7 @@ function toast(s) { net.toast = s; net.toastAt = fx.now; }
 function send(m) { if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify(m)); }
 function connect(code) {
   net.err = ""; net.code = code; net.mode = "online"; net.seats = []; net.me = ""; net.host = ""; net.confirm = false;
-  chosen = -1; phase = "lobby"; S = null; game = null; tut = null; duel = null; D = null; team = [];
+  chosen = -1; phase = "lobby"; S = null; game = null; tut = null; duel = null; D = null; DR = null; draft = null;
   const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws?room=" + code;
   let ws;
   try { ws = new WebSocket(url); } catch (e) { net.err = "Could not reach the game server."; return; }
@@ -1530,7 +1641,7 @@ function connect(code) {
 }
 function leaveRoom() {
   const ws = net.ws;
-  net.ws = null; net.mode = "solo"; net.err = ""; S = null; game = null; phase = "title"; D = null; duel = null;
+  net.ws = null; net.mode = "solo"; net.err = ""; S = null; game = null; phase = "title"; D = null; duel = null; DR = null; draft = null;
   if (ws) try { ws.close(); } catch (e) { /* уже закрыт */ }
   try { history.replaceState(null, "", location.pathname); } catch (e) { /* не страшно */ }
 }
@@ -1556,15 +1667,22 @@ function onMsg(m) {
     net.host = m.host; net.seats = Array.isArray(m.seats) ? m.seats : []; net.watching = m.watching | 0; net.gm = m.mode === "duel" ? "duel" : "ffa";
     const mine = net.seats.find(s => s.id === net.me);
     if (mine && mine.e >= 0 && net.gm !== "duel") chosen = mine.e;
-    if (mine) team = Array.isArray(mine.team) ? mine.team.slice() : [];
+    if (m.phase === "lobby") DR = null;
     if (m.phase === "lobby" && phase !== "lobby" && phase !== "settings") { phase = "lobby"; S = null; }
   } else if (m.t === "s" && m.s) queueSnap(m.s);
+  else if (m.t === "duel") {
+    DR = { ph: m.ph, draft: m.draft, dm: m.dm, blind: !!m.blind, names: m.names, pids: m.pids, until: fx.now + (m.left || 0) / 1000 };
+    if (m.dm) D = Object.assign({}, m.dm, { names: m.names, pids: m.pids, side: (m.pids || []).indexOf(net.me) });
+    const next = m.ph === "draft" ? "ddraft" : "dchoose";
+    if (phase !== next) { phase = next; pickAt = fx.now; chosen = -1; if (next === "ddraft") snd.voice(); }
+  }
   else if (m.t === "pong") net.ping = performance.now() - m.c;
 }
 // Снимки идут в очередь и показываются с задержкой DELAY: шар плавно едет между двумя снимками,
 // даже если сеть присылает их неровно. Сдвиг часов сервера оцениваем по самому быстрому снимку.
 const DELAY = 110;
 function queueSnap(st) {
+  if ((phase === "ddraft" || phase === "dchoose") && S && st.m === S.m) return;  // хвост прошлого раунда уже не нужен
   const off = Date.now() - (st.w || Date.now());
   net.offs.push(off); if (net.offs.length > 60) net.offs.shift();
   net.off = Math.min(...net.offs);
@@ -1604,6 +1722,9 @@ function applySnap(st) {
     S = { m: st.m, tick: 0, t: 0, owner: new Int8Array(N).fill(-1), src: new Int8Array(N).fill(-1), L: {}, fade: new Float32Array(N),
       flash: new Float32Array(N), players: st.b.map(r => r[0]), balls: [], by: {}, counts: new Array(NEL).fill(0), reactions: 0,
       promptUntil: -1, clones: [], mirror: true };
+    const ar = Array.isArray(st.ar) ? st.ar : [0, 0, W, H];
+    Object.assign(S, { ax0: ar[0], ay0: ar[1], ax1: ar[2], ay1: ar[3], inA: new Uint8Array(N), area: (ar[2] - ar[0]) * (ar[3] - ar[1]) });
+    for (let j = ar[1]; j < ar[3]; j++) for (let i = ar[0]; i < ar[2]; i++) S.inA[j * W + i] = 1;
     for (const n of LAYERS) S.L[n] = new Float32Array(N);
     for (const r of st.b) { const b = newBall(r[0], r[1], r[2], null); S.balls.push(b); S.by[r[0]] = b; if (r[18] && r[18] === net.me) S.you = b; }
     S.you = S.you || null;
@@ -1667,7 +1788,7 @@ function openPick() {
   } else roulette = null;
 }
 function startSolo(e) {
-  tut = null; duel = null; D = null; track("solo_start", { v: e });
+  tut = null; duel = null; D = null; DR = null; draft = null; track("solo_start", { v: e });
   const used = [e];
   for (let i = 0; i < 3; i++) used.push(pickFree(used));
   game = new Game(used.map((q, i) => ({ e: q, ctl: i === 0 ? "me" : null })));
@@ -1699,7 +1820,7 @@ function update(dt) {
       if (S.done) { if (duel) duelRoundEnd(); else startWin(); }
     }
   }
-  if (duel && phase === "rend" && net.mode === "solo" && fx.now - rendAt > 3.5) { if (duel.done) startWin(); else duelRound(); }
+  if (net.mode === "solo" && (draft || duel)) soloDuelUpdate();
   if (S && (phase === "play" || phase === "aim") && Math.random() < .3) ambient();
   const sd = dt * slow;
   for (const p of fx.parts) { p.x += p.vx * sd; p.y += p.vy * sd; p.vx *= .95; p.vy *= .95; p.t += sd; }
@@ -1736,7 +1857,8 @@ function draw() {
   if (phase === "title") { drawTitle(t); return; }
   if (phase === "settings") { drawSettings(); return; }
   if (phase === "pick") { drawPick(t); return; }
-  if (phase === "dpick") { drawDuelPick(t); return; }
+  if (phase === "ddraft" && DR) { drawDraft(t); return; }
+  if (phase === "dchoose" && DR && DR.dm) { drawChoose(t); return; }
   if (phase === "join") { drawJoin(); return; }
   if (phase === "name") { drawName(); return; }
   if (phase === "lobby" || !S) { if (phase !== "lobby") phase = "lobby"; drawLobby(t); return; }
@@ -1746,6 +1868,7 @@ function draw() {
   const q = !S.mirror && phase === "play" ? Math.min(1, acc / DT) : 1;
   if (S.mirror) for (const b of S.balls) { b._px = b.px; b._py = b.py; b._pa = b.pang; b.px = b.rx; b.py = b.ry; b.pang = b.rang; }
   if (S.mirror) for (const b of S.balls) { b._x = b.x; b._y = b.y; b._a = b.ang; b.x = b.rx; b.y = b.ry; b.ang = b.rang; }
+  setView();
   drawField(t, q, aiming);
   drawHud(t);
   if (S.mirror && net.ping) txt(`${Math.round(net.ping)} ms`, 704, 24, 17, net.ping < 120 ? "#7ee6a8" : net.ping < 250 ? "#ffd63c" : "#ff7878", { a: "right" });
@@ -1754,7 +1877,7 @@ function draw() {
   if (S.mirror) for (const b of S.balls) { b.x = b._x; b.y = b._y; b.ang = b._a; b.px = b._px; b.py = b._py; b.pang = b._pa; }
   if (tut) drawTut(t);
   if (aiming && D) {
-    const [a, b] = D.teams.map((tm, i) => TITLE[tm[Math.min(D.idx[i], tm.length - 1)]]);
+    const [a, b] = D.cur.map(e => TITLE[e] || "?");
     big(`ROUND ${D.round}`, VW / 2, FY + 160, 40, "#ffd63c", { stroke: 5 });
     big(`${a}  VS  ${b}`, VW / 2, FY + 214, 44, "#fff", { stroke: 5, max: 660 });
   }
@@ -1789,7 +1912,7 @@ function at2(e) {
   return [(e.clientX - r.left) / r.width * VW, (e.clientY - r.top) / r.height * VH];
 }
 function aimAt(x, y) {
-  const b = S.you, dx = (x - FX) / CELL - b.x, dy = (y - FY) / CELL - b.y, n = Math.hypot(dx, dy);
+  const b = S.you, dx = cellX(x) - b.x, dy = cellY(y) - b.y, n = Math.hypot(dx, dy);
   if (n < .4) return;
   b.dx = dx / n; b.dy = dy / n;
   if (net.mode === "online" && fx.now - net.aimAt > .05) { net.aimAt = fx.now; send({ t: "aim", dx: r2(b.dx), dy: r2(b.dy) }); }
@@ -1804,10 +1927,10 @@ function tryPress() {
 function tapField(x, y) {
   const b = S.you;
   if (!b || !b.alive) return;
-  const dx = (x - FX) / CELL - b.x, dy = (y - FY) / CELL - b.y;
+  const dx = cellX(x) - b.x, dy = cellY(y) - b.y;
   if (Math.hypot(dx, dy) < .4) return;
   haptic("light");
-  if (net.mode === "online") { send({ t: "dir", dx: r2(dx), dy: r2(dy) }); fx.ring((x - FX) / CELL, (y - FY) / CELL, 70, 10, .4, "#fff", 8); }
+  if (net.mode === "online") { send({ t: "dir", dx: r2(dx), dy: r2(dy) }); fx.ring(cellX(x), cellY(y), 70, 10, .4, "#fff", 8); }
   else { game.redirect(b.e, dx, dy); flushEvents(); }
 }
 function joinFromInput() {
@@ -1824,7 +1947,7 @@ cv.addEventListener("pointerdown", e => {
     net.err = "";
     if (inside(BTN.gear, x, y)) { prevPhase = "title"; phase = "settings"; }
     else if (inside(BTN.solo, x, y)) openPick();
-    else if (inside(BTN.duel, x, y)) openDuelPick();
+    else if (inside(BTN.duel, x, y)) openDuel();
     else if (inside(BTN.create, x, y)) { if (!myName()) askName(createRoom); else createRoom(); }
     else if (inside(BTN.join, x, y)) {
       const go = () => { phase = "join"; setTimeout(() => document.getElementById("code").focus(), 50); };
@@ -1843,8 +1966,8 @@ cv.addEventListener("pointerdown", e => {
   } else if (phase === "join") {
     if (inside(BTN.joinGo, x, y)) joinFromInput();
     else if (inside(BTN.back, x, y)) { net.err = ""; phase = "title"; }
-  } else if (phase === "dpick") {
-    duelPickTap(x, y);
+  } else if (phase === "ddraft" || phase === "dchoose") {
+    if (DR) duelTap(x, y);
   } else if (phase === "pick") {
     if (inside(BTN.gear, x, y)) { prevPhase = "pick"; phase = "settings"; return; }
     if (inside(BTN.play, x, y)) { startSolo(chosen >= 0 ? chosen : irnd(0, NEL - 1)); return; }
@@ -1864,15 +1987,7 @@ cv.addEventListener("pointerdown", e => {
     if (!online && net.err && inside(BTN.reconnect, x, y)) { connect(net.code); return; }
     if (net.me === net.host && inside(BTN.start, x, y)) { if (net.seats.length < (net.gm === "duel" ? 2 : 4)) net.confirm = true; else send({ t: "start" }); return; }
     const q = gridHit(x, y, 392, 96, 31);
-    if (net.gm === "duel") {
-      const taken = net.seats.filter(s => s.id !== net.me).flatMap(s => s.team || []);
-      if (q < 0 || taken.includes(q) || !net.seats.some(s => s.id === net.me)) return;
-      chosen = q;
-      const at = team.indexOf(q);
-      if (at >= 0) team.splice(at, 1); else if (team.length < DUEL_SIZE) { team.push(q); snd.power(q); }
-      send({ t: "team", team });
-      return;
-    }
+    if (net.gm === "duel") { if (q >= 0) { chosen = q; snd.tick(); } return; }
     const taken = net.seats.filter(s => s.id !== net.me && s.e >= 0).map(s => s.e);
     if (q >= 0 && !taken.includes(q)) { chosen = q; snd.power(q); send({ t: "pick", e: q }); }
   } else if (tut && (phase === "aim" || phase === "play") && tutTap(x, y)) {
@@ -1888,8 +2003,8 @@ cv.addEventListener("pointerdown", e => {
       if (inside(BTN.again, x, y)) { tut = null; S = null; game = null; openPick(); }
       else if (inside(BTN.change, x, y)) { tut = null; S = null; game = null; phase = "title"; }
     } else if (duel && net.mode === "solo") {
-      if (inside(BTN.again, x, y)) startDuelSolo(team.slice());
-      else if (inside(BTN.change, x, y)) { const keep = team.slice(); openDuelPick(); team = keep; }
+      if (inside(BTN.again, x, y)) openDuel();
+      else if (inside(BTN.change, x, y)) { duel = null; draft = null; D = null; DR = null; S = null; game = null; phase = "title"; }
     } else if (net.mode === "solo") {
       if (inside(BTN.again, x, y)) startSolo(S.you.e);
       else if (inside(BTN.change, x, y)) { phase = "pick"; pickAt = fx.now; chosen = S.you.e; }

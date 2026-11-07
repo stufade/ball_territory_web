@@ -1,10 +1,10 @@
 // Кто кого в дуэли 1 на 1: каждая пара по R раундов. Печатает DSTRONG и DWEAK для public/game.js (подсветка в выборе команды).
 // node test/duel-table.mjs [R]
-import { Game, NEL, TITLE, DUEL_ROUND, DUEL_PACE } from "../public/game.js";
+import { Game, NEL, TITLE, DUEL_OPTS, DUEL_PACE } from "../public/game.js";
 const R = +process.argv[2] || 10;
 const w = [...Array(NEL)].map(() => new Array(NEL).fill(0));
 for (let a = 0; a < NEL; a++) for (let b = a + 1; b < NEL; b++) for (let i = 0; i < R; i++) {
-  const g = new Game([{ e: a, ctl: null }, { e: b, ctl: null }], { round: DUEL_ROUND, pace: DUEL_PACE });
+  const g = new Game([{ e: a, ctl: null }, { e: b, ctl: null }], Object.assign({ pace: DUEL_PACE }, DUEL_OPTS));
   g.launch();
   while (!g.S.done) { g.step(); g.drain(); }
   const c = g.S.counts;

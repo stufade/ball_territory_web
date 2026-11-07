@@ -1,14 +1,14 @@
 // Подстройка баланса: меняем скорость заряда силы (PACE) так, чтобы каждая стихия выигрывала 20-30% матчей на четверых.
 // node test/tune.mjs [матчей на попытку] [попыток]  -> печатает PACE для public/game.js
 // node test/tune.mjs duel [повторов каждой пары] [попыток] -> DUEL_PACE: каждая стихия выигрывает 40-60% раундов 1 на 1
-import { Game, NEL, TITLE, PACE, DUEL_PACE, DUEL_ROUND, pickFree } from "../public/game.js";
+import { Game, NEL, TITLE, PACE, DUEL_PACE, DUEL_OPTS, pickFree } from "../public/game.js";
 const DUEL = process.argv[2] === "duel", args = process.argv.slice(DUEL ? 3 : 2);
 const R = +args[0] || (DUEL ? 4 : 2000), TRIES = +args[1] || 8;
 const K = DUEL ? DUEL_PACE : PACE, LO = DUEL ? 40 : 20, HI = DUEL ? 60 : 30, MID = (LO + HI) / 2;
 function duelRates() {
   const wins = new Array(NEL).fill(0), games = new Array(NEL).fill(0);
   for (let a = 0; a < NEL; a++) for (let b = a + 1; b < NEL; b++) for (let i = 0; i < R; i++) {
-    const g = new Game([{ e: a, ctl: null }, { e: b, ctl: null }], { round: DUEL_ROUND, pace: DUEL_PACE });
+    const g = new Game([{ e: a, ctl: null }, { e: b, ctl: null }], Object.assign({ pace: DUEL_PACE }, DUEL_OPTS));
     g.launch();
     while (!g.S.done) { g.step(); g.drain(); }
     const c = g.S.counts; games[a]++; games[b]++;
