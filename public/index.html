@@ -1661,7 +1661,8 @@ function createRoom() {
   connect(code);
 }
 function invite() {
-  const link = cfg.bot ? `https://t.me/${cfg.bot}${cfg.app ? "/" + cfg.app : ""}?startapp=r_${net.code}`
+  // с коротким именем Mini App ссылка открывает игру сразу, без него бот отвечает кнопкой «JOIN THE ROOM»
+  const link = cfg.bot ? (cfg.app ? `https://t.me/${cfg.bot}/${cfg.app}?startapp=r_${net.code}` : `https://t.me/${cfg.bot}?start=r_${net.code}`)
     : `${location.origin}${location.pathname}?room=${net.code}`;
   const text = `Join my Ball Territory room ${net.code.toUpperCase()}!`;
   if (tg && tg.openTelegramLink) { tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`); return; }

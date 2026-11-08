@@ -63,6 +63,15 @@
    и снова выполни `npm run deploy`. Теперь кнопка INVITE FRIEND даёт ссылку вида `https://t.me/BallTerritoryBot?startapp=r_abcd`: друг нажимает её и сразу попадает в твою комнату.
    Если вместо «Configure Mini App» ты делал `/newapp` с коротким именем, впиши его в `APP_NAME`, и ссылка станет `t.me/<бот>/<имя>?startapp=...`.
 
+## Кнопка «играть» в боте
+
+На /start (и на любое сообщение в личке) бот отвечает кнопкой ▶️ PLAY, которая открывает игру. Отвечает тот же Worker (`/tg/hook` в `src/worker.js`),
+токен бота на сервере не хранится. Подключить один раз, в своём терминале (токен из BotFather):
+```
+curl "https://api.telegram.org/bot<ТОКЕН>/setWebhook?url=https://ball-territory.ball-territory.workers.dev/tg/hook"
+```
+Ссылка-приглашение `t.me/<бот>?start=r_abcd` даёт кнопку ▶️ JOIN THE ROOM прямо в комнату друга.
+
 ## Как играть с другом
 
 1. Открой бота → Open (или кнопка игры в меню бота).
