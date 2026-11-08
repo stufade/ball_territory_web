@@ -7,5 +7,5 @@
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }, { "name": "STATS", "class_name": "Stats" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["Stats"] }],
   // имя бота без @ и короткое имя Mini App из BotFather; без них приглашение даёт обычную ссылку на сайт
-  "vars": { "BOT_USERNAME": "", "APP_NAME": "" }
+  "vars": { "BOT_USERNAME": "ChooseYourElementBot", "APP_NAME": "" }
 }
